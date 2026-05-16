@@ -49,6 +49,44 @@ void pop_eye_offset();
 // per-eye-corrected matrix.
 void apply_eye_to_reflection_effect_mtx(Mtx mtx, ::J3DTexMtxInfo* info, ::J3DModel* model);
 
+// Variant for "halo" / player-centered texgens that are built by concatenating
+// a C_MTXLightPerspective with a lookAt looking DOWN at the player (e.g. MA20
+// in d_kankyo.cpp -- the circular reflection that appears in water at the
+// character's feet). The composite matrix has q row (0, -1, 0, player.y)
+// instead of (0, 0, -1, 0), so the view-shift's per-eye UV contribution has
+// the opposite sign of a standard reflection. This helper bakes in the
+// opposite-direction correction so the halo doesn't appear mirrored between
+// eyes.
+void apply_eye_to_halo_effect_mtx(Mtx mtx, ::J3DTexMtxInfo* info, ::J3DModel* model);
+
+// Returns the per-eye X translation that push_eye_offset applied to the
+// view matrix for whichever eye is currently active (s_current_eye).
+// Sign matches what push_eye_offset subtracted from viewMtx[0][3]:
+// LEFT eye -> -halfSep, RIGHT eye -> +halfSep. Returns 0 when stereo is
+// off so callers can unconditionally add it back without branching.
+f32 current_eye_offset_x();
+
+// Depth-aware per-particle correction for any screen-space-projection
+// texgen built like `mtx = LightPerspective * camera_space_srt` and
+// sampled at billboard corners (the JPA refraction pattern in
+// loadPrj/loadPrjAnm). Returns the value to ADD to srt[0][3] before the
+// concat. `srt_z_view` is the camera-space Z of the particle (= negative
+// depth).
+//
+// Derivation: the texgen UV's natural per-eye drift is
+//   ΔUV_texgen = -mPrjMtx[0][0] * eyeOffsetX / depth
+// because mPosCamMtx shifts srt[0][3] by -eyeOffsetX and q in the
+// perspective divide ≈ depth. Geometry drifts off-axis as
+//   ΔUV_geom = -0.5 * eyeOffsetX * projMtx[0][0] * (1/depth - 1/convergence)
+// With C_MTXLightPerspective's scaleS=0.5, mPrjMtx[0][0] = 0.5 *
+// projMtx[0][0], so the gap reduces to a depth-independent constant
+//   +0.5 * eyeOffsetX * projMtx[0][0] / convergence.
+// Adding -eyeOffsetX * srt[2][3] / convergence to srt[0][3] produces
+// exactly that constant after the mPrjMtx[0][0]/depth divide.
+//
+// Returns 0 when stereo is off or convergence is degenerate.
+f32 refraction_skew_correction_x(f32 srt_z_view);
+
 // Painter-funnel hooks. apply_reflection_corrections_for_eye re-derives each
 // registered material's mEffectMtx from its saved base matrix using the given
 // eye, so the matrix is correct for whichever eye is about to render next.

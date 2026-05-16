@@ -922,21 +922,6 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .valueMax = 1000,
                 .defaultValue = 50, // 50 * 100 = 5000 world units, ~50m
             }, mPrelaunch);
-        graphics_tuner_control(*this, leftPane, rightPane,
-            getSettings().game.stereoReflectionParallax,
-            GraphicsTunerProps{
-                .option = GraphicsOption::StereoReflectionParallax,
-                .title = "Reflection Parallax",
-                .helpText = "Tune the per-eye sampling shift for water reflections."
-                            " -1.0 doubles the natural parallax (max depth split);"
-                            " 0.0 leaves only the natural view-shift parallax;"
-                            " +1.0 attempts to cancel the per-eye spread; +2.0 cancels"
-                            " more aggressively. Adjust if reflections look split or"
-                            " spread in a triangle between eyes.",
-                .valueMin = -20,
-                .valueMax = 20,
-                .defaultValue = -10, // -1.0 (pre-flip behavior)
-            }, mPrelaunch);
     });
 
     add_tab("Input", [this](Rml::Element* content) {

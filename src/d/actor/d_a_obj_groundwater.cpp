@@ -8,6 +8,9 @@
 #include "d/actor/d_a_obj_groundwater.h"
 #include "d/d_com_inf_game.h"
 #include "m_Do/m_Do_graphic.h"
+#ifdef TARGET_PC
+#include "dusk/stereo.h"
+#endif
 
 static daGrdWater_HIO_c l_HIO;
 
@@ -305,7 +308,16 @@ int daGrdWater_c::Draw() {
             #if WIDESCREEN_SUPPORT
             mDoGph_gInf_c::setWideZoomLightProjection(afStack_50);
             #endif
+#ifdef TARGET_PC
+            // Ground water reflection -- register with the painter funnel
+            // so mEffectMtx + the model's DL are rebuilt per eye with the
+            // per-eye-corrected matrix (same as the main MA10/MA02 water
+            // reflection in d_kankyo). Without this, only one eye gets
+            // proper stereo on the reflection.
+            dusk::stereo::apply_eye_to_reflection_effect_mtx(afStack_50, mtxInfo, mModel2);
+#else
             mtxInfo->setEffectMtx(afStack_50);
+#endif
             modelData2->simpleCalcMaterial(0, (MtxP)j3dDefaultMtx);
         }
     }

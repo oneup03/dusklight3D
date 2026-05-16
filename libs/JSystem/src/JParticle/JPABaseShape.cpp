@@ -11,6 +11,7 @@
 
 #if TARGET_PC
 #include "dusk/frame_interpolation.h"
+#include "dusk/stereo.h"
 #endif
 #include "tracy/Tracy.hpp"
 
@@ -367,7 +368,26 @@ static void noLoadPrj(JPAEmitterWorkData const* work, const Mtx srt) {
 
 void loadPrj(JPAEmitterWorkData const* work, const Mtx srt) {
     Mtx mtx;
+#if TARGET_PC
+    // The natural per-eye drift of this texgen UV is -eyeOffsetX *
+    // mPrjMtx[0][0] / depth (from srt[0][3] inheriting the mPosCamMtx
+    // shift). The geometry below drifts as -0.5 * eyeOffsetX *
+    // projMtx[0][0] * (1/depth - 1/convergence) -- off-axis stereo with
+    // zero parallax at convergence. Their difference reduces to a single
+    // constant +0.5 * eyeOffsetX * projMtx[0][0] / convergence regardless
+    // of depth, so we add a srt[0][3] term that produces exactly that
+    // constant UV nudge after the perspective divide. See
+    // dusk::stereo::refraction_skew_correction_x for the full derivation.
+    //
+    // PNMTX0 keeps the per-eye srt (so the particle still draws at the
+    // per-eye-correct screen position); only the texgen UV is adjusted.
+    Mtx corrected_srt;
+    MTXCopy(srt, corrected_srt);
+    corrected_srt[0][3] += dusk::stereo::refraction_skew_correction_x(corrected_srt[2][3]);
+    MTXConcat(work->mPrjMtx, corrected_srt, mtx);
+#else
     MTXConcat(work->mPrjMtx, srt, mtx);
+#endif
     GXLoadTexMtxImm(mtx, GX_TEXMTX0, GX_MTX3x4);
 }
 
@@ -399,7 +419,16 @@ static void loadPrjAnm(JPAEmitterWorkData const* work, const Mtx srt) {
     local_108[2][2] = 1.0f;
     local_108[2][3] = 0.0f;
     MTXConcat(local_108, work->mPrjMtx, local_108);
+#if TARGET_PC
+    // Same depth-aware correction as loadPrj above -- see comment there
+    // and dusk::stereo::refraction_skew_correction_x for the derivation.
+    Mtx corrected_srt;
+    MTXCopy(srt, corrected_srt);
+    corrected_srt[0][3] += dusk::stereo::refraction_skew_correction_x(corrected_srt[2][3]);
+    MTXConcat(local_108, corrected_srt, local_108);
+#else
     MTXConcat(local_108, srt, local_108);
+#endif
     GXLoadTexMtxImm(local_108, 0x1e, GX_MTX3x4);
 }
 

@@ -11612,7 +11612,17 @@ void dKy_bg_MAxx_proc(void* bg_model_p) {
                                           player_p->current.pos.z);
                                 cMtx_lookAt(sp118, &spC0, &spD8, 0);
                                 cMtx_concat(sp148, sp118, sp118);
+#ifdef TARGET_PC
+                                // MA20 player-centered halo. Composite matrix
+                                // has q row (0, -1, 0, player.y), not the
+                                // standard (0, 0, -1, 0), so use the halo
+                                // variant which applies a sign-flipped
+                                // correction (otherwise the halo looks
+                                // mirrored between eyes).
+                                dusk::stereo::apply_eye_to_halo_effect_mtx(sp118, tex_mtx_inf, model_p);
+#else
                                 tex_mtx_inf->setEffectMtx(sp118);
+#endif
                             }
                         }
                     }

@@ -16,6 +16,9 @@
 #include "f_op/f_op_actor.h"
 #include "f_op/f_op_actor_mng.h"
 #include "m_Do/m_Do_graphic.h"
+#ifdef TARGET_PC
+#include "dusk/stereo.h"
+#endif
 
 static int daObj_Tp_Draw(obj_tp_class* i_this) {
     g_env_light.settingTevStruct(0x10, &i_this->current.pos, &i_this->tevStr);
@@ -41,7 +44,11 @@ static int daObj_Tp_Draw(obj_tp_class* i_this) {
                         #if WIDESCREEN_SUPPORT
                         mDoGph_gInf_c::setWideZoomLightProjection(lightProjMtx);
                         #endif
+#ifdef TARGET_PC
+                        dusk::stereo::apply_eye_to_reflection_effect_mtx(lightProjMtx, texMtxInfo, i_this->mModels[i]);
+#else
                         texMtxInfo->setEffectMtx(lightProjMtx);
+#endif
                         modelData->simpleCalcMaterial(0, (MtxP)j3dDefaultMtx);
                     }
                 }

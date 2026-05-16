@@ -2,16 +2,24 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "(gdb) Launch Dusklight MSVC",
+            "name": "Launch Dusklight (RelWithDebInfo)",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${command:cmake.launchTargetPath}",
-            "args": ["-l", "1", "--dvd", "${workspaceRoot}/orig/GZ2E01/GZ2E01.iso", "--console"],
-            "MIMode": "gdb",
-            "miDebuggerPath": "gdb",
-            "symbolSearchPath": "${command:cmake.launchTargetPath}",
+            "program": "${workspaceFolder}/build/windows-msvc-relwithdebinfo/dusklight.exe",
+            "args": ["${workspaceFolder}/game.iso"],
+            "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
-            "cwd":"${workspaceRoot}"
+            "preLaunchTask": "CMake: Build (RelWithDebInfo)"
+        },
+        {
+            "name": "Launch Dusklight (Debug)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/windows-msvc-debug/dusklight.exe",
+            "args": ["${workspaceFolder}/game.iso"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "CMake: Build (Debug)"
         }
     ]
 }

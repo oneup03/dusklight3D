@@ -67,6 +67,17 @@ enum class MagicArmorMode : u8 {
     COSMETIC = 4,
 };
 
+enum class StereoMode : int {
+    Off = 0,
+    SideBySide = 1,
+    TopBottom = 2,
+    RowInterlaced = 3,
+    ColumnInterlaced = 4,
+    Checkerboard = 5,
+    Anaglyph = 6,
+    LeiaSR = 7,
+};
+
 namespace config {
 template <>
 struct ConfigEnumRange<BloomMode> {
@@ -120,6 +131,12 @@ template <>
 struct ConfigEnumRange<MagicArmorMode> {
     static constexpr auto min = MagicArmorMode::NORMAL;
     static constexpr auto max = MagicArmorMode::COSMETIC;
+};
+
+template <>
+struct ConfigEnumRange<StereoMode> {
+    static constexpr auto min = StereoMode::Off;
+    static constexpr auto max = StereoMode::LeiaSR;
 };
 
 template <>
@@ -207,6 +224,10 @@ struct UserSettings {
         ConfigVar<Resampler> resampler;
         ConfigVar<bool> enableMapBackground;
         ConfigVar<bool> disableCutscenePillarboxing;
+        ConfigVar<StereoMode> stereoMode;
+        ConfigVar<float> stereoEyeSeparation;
+        ConfigVar<float> stereoConvergence;
+        ConfigVar<float> stereoHudDepth;
 
         // Audio
         ConfigVar<bool> noLowHpSound;

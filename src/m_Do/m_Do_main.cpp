@@ -62,6 +62,7 @@
 #include "dusk/imgui/ImGuiEngine.hpp"
 #include "dusk/iso_validate.hpp"
 #include "dusk/mod_loader.hpp"
+#include "dusk/stereo.h"
 #include "dusk/logging.h"
 #include "dusk/main.h"
 #include "dusk/os.h"
@@ -673,6 +674,7 @@ int game_main(int argc, char* argv[]) {
         aurora_set_resampler(SAMPLER_BILINEAR);
         break;
     }
+    dusk::stereo::apply_config_from_settings();
 
     dusk::audio::SetMasterVolume(dusk::audio::MasterVolumeToLinear(dusk::getSettings().audio.masterVolume / 100.0f));
     dusk::audio::SetEnableReverb(dusk::getSettings().audio.enableReverb);

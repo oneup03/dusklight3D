@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(cmake --build --preset windows-msvc-relwithdebinfo 2>&1)",
+      "PowerShell($vsPath = \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\VC\\\\Auxiliary\\\\Build\\\\vcvars64.bat\"; if \\(Test-Path $vsPath\\) { Write-Output \"Found: $vsPath\" } else { Write-Output \"Not found at: $vsPath\" })",
+      "PowerShell(cmd /c \"`\"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\VC\\\\Auxiliary\\\\Build\\\\vcvars64.bat`\" && cmake --build --preset windows-msvc-relwithdebinfo --target aurora_core aurora_gx 2>&1\")"
+    ]
+  }
+}

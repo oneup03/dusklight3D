@@ -7,6 +7,13 @@
 #include "m_Do/m_Do_mtx.h"
 #include "mtx.h"
 
+#include "JSystem/J3DGraphAnimator/J3DModel.h"
+#include "JSystem/J3DGraphAnimator/J3DModelData.h"
+#include "JSystem/J3DGraphBase/J3DStruct.h"
+#include "JSystem/J3DGraphBase/J3DTransform.h"
+
+#include <vector>
+
 namespace dusk::stereo {
 
 namespace {
@@ -25,6 +32,60 @@ struct SavedCameraState {
 };
 
 SavedCameraState s_saved[kMaxCameras]{};
+
+// Tracks which eye the painter most recently pushed. Used by the in-place
+// fallback path of apply_eye_to_reflection_effect_mtx; the registry path
+// reads the eye that the painter passes to apply_reflection_corrections.
+AuroraEye s_current_eye = AURORA_EYE_LEFT;
+
+// Reflection-texgen registry. The water actor's Draw method runs once per
+// frame (before the painter's eye loop) and builds the material's display
+// list with one cached matrix value -- both eyes would otherwise render with
+// it. To get both eyes, the actor Draw registers (model, info, base) here,
+// and the painter funnel rewrites mEffectMtx + rebuilds the model's DL per
+// eye via calcMaterial()/diff() between iterations. The model pointer is
+// required because the matrix lives baked inside the DL; updating just
+// mEffectMtx without rebuilding the DL has no visible effect.
+struct ReflectionEntry {
+    J3DTexMtxInfo* info;
+    J3DModel* model;
+    Mtx base;
+};
+std::vector<ReflectionEntry> s_reflections;
+
+void apply_reflection_correction_to(Mtx mtx, AuroraEye eye) {
+    const f32 separation = getSettings().game.stereoEyeSeparation.getValue();
+    const f32 convergence = getSettings().game.stereoConvergence.getValue();
+    if (convergence <= 0.0001f) {
+        return;
+    }
+
+    // Per-eye correction magnitudes in view-space X (game units).
+    //
+    // Determined empirically: a symmetric ±sep/2 shift on the depth-dependent
+    // term leaves a triangular per-eye spread (near water splits more than
+    // far water) because of asymmetric interaction with the texgen / per-eye
+    // EFB sampling pipeline. Asymmetric magnitudes -- left eye gets half,
+    // right eye gets full sep -- bring both eyes' reflections into alignment
+    // across camera angles. The constant z-coefficient term stays symmetric
+    // since it doesn't interact with depth.
+    //
+    // The stereoReflectionParallax setting (Video -> Stereoscopic 3D ->
+    // Reflection Parallax slider) is kept wired through the settings/UI for
+    // future testing of other reflection-pipeline pieces, but isn't consumed
+    // by this specific correction.
+    const f32 halfSep = separation * 0.5f;
+    const f32 depthShift = (eye == AURORA_EYE_LEFT) ? -halfSep : 2.0f * halfSep;
+    const f32 constShift = (eye == AURORA_EYE_LEFT) ? -halfSep : halfSep;
+    const f32 m00 = mtx[0][0];
+
+    // mtx[0][3]: depth-dependent UV shift (constant in s, becomes ~1/depth
+    // in u after the perspective divide by -view_z).
+    mtx[0][3] += -depthShift * m00;
+    // mtx[0][2]: constant per-eye UV translation regardless of depth.
+    // Both eyes' UVs end up offset by m00 * halfSep / convergence.
+    mtx[0][2] += -constShift * m00 / convergence;
+}
 
 AuroraStereoMode current_mode() {
     return static_cast<AuroraStereoMode>(static_cast<int>(getSettings().game.stereoMode.getValue()));
@@ -47,6 +108,7 @@ void apply_config_from_settings() {
 }
 
 void push_eye_offset(AuroraEye eye) {
+    s_current_eye = eye;
     const f32 separation = getSettings().game.stereoEyeSeparation.getValue();
     const f32 convergence = getSettings().game.stereoConvergence.getValue();
     if (convergence <= 0.0001f) {
@@ -130,6 +192,87 @@ void push_eye_offset(AuroraEye eye) {
         view.lookat.center.y += eyeOffsetX * rightY;
         view.lookat.center.z += eyeOffsetX * rightZ;
     }
+}
+
+void apply_eye_to_reflection_effect_mtx(Mtx mtx, J3DTexMtxInfo* info, J3DModel* model) {
+    if (!active() || info == nullptr) {
+        if (info != nullptr) {
+            info->setEffectMtx(mtx);
+        }
+        return;
+    }
+
+    // Register / refresh. Replace any existing entry for the same info so
+    // multiple sim_ticks per frame (interp mode) don't accumulate.
+    bool found = false;
+    for (auto& entry : s_reflections) {
+        if (entry.info == info) {
+            entry.model = model;
+            MTXCopy(mtx, entry.base);
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        ReflectionEntry entry;
+        entry.info = info;
+        entry.model = model;
+        MTXCopy(mtx, entry.base);
+        s_reflections.push_back(entry);
+    }
+
+    // Write the BASE matrix (no per-eye correction) so the actor Draw's
+    // DL build seeds a neutral starting point. The painter funnel then
+    // rebuilds the DL per eye with the eye-corrected matrix. Skipping the
+    // initial correction here avoids any asymmetry where the seed value
+    // (driven by whatever s_current_eye happened to be at actor-Draw time)
+    // could bleed into one eye's rebuilt DL more than the other.
+    info->setEffectMtx(mtx);
+}
+
+void apply_reflection_corrections_for_eye(AuroraEye eye) {
+    if (!active()) {
+        return;
+    }
+    // Step 1: rewrite each material's mEffectMtx for this eye.
+    for (auto& entry : s_reflections) {
+        Mtx corrected;
+        MTXCopy(entry.base, corrected);
+        apply_reflection_correction_to(corrected, eye);
+        entry.info->setEffectMtx(corrected);
+    }
+    // Step 2: rebuild each affected model's DL so the new mEffectMtx flows
+    // through calcMaterial -> mMtx -> diff -> baked into the DL that the
+    // packet draw will invoke. Without this rebuild the DL still carries the
+    // matrix value from the original actor Draw and both eyes render with it.
+    // Dedupe linearly -- there's usually <= 2 distinct models, so a set is
+    // overkill.
+    J3DModel* rebuilt[8] = {};
+    int rebuiltCount = 0;
+    for (auto& entry : s_reflections) {
+        if (entry.model == nullptr) {
+            continue;
+        }
+        bool already = false;
+        for (int i = 0; i < rebuiltCount; ++i) {
+            if (rebuilt[i] == entry.model) { already = true; break; }
+        }
+        if (already || rebuiltCount >= 8) {
+            continue;
+        }
+        // Use simpleCalcMaterial(j3dDefaultMtx) -- same input the actor Draw
+        // used (modelData->simpleCalcMaterial((MtxP)j3dDefaultMtx)). Going
+        // through J3DModel::calcMaterial would feed the joint's anm matrix
+        // instead, producing a different mMtx than the actor Draw expected
+        // and leaving each eye's rebuilt DL with a constant offset.
+        entry.model->getModelData()->simpleCalcMaterial((MtxP)j3dDefaultMtx);
+        entry.model->diff();
+        rebuilt[rebuiltCount++] = entry.model;
+    }
+}
+
+void clear_reflection_registry() {
+    s_reflections.clear();
 }
 
 void pop_eye_offset() {

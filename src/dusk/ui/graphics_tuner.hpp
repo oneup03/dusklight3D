@@ -51,7 +51,6 @@ enum class GraphicsOption {
     StereoEyeSeparation,
     StereoConvergence,
     StereoHudDepth,
-    StereoReflectionParallax,
 };
 
 Rml::String format_graphics_setting_value(GraphicsOption option, int value);

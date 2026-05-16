@@ -96,6 +96,11 @@ void set_value(GraphicsOption option, int value) {
             static_cast<float>(std::clamp(value, -20, 20)));
         stereo::apply_config_from_settings();
         break;
+    case GraphicsOption::StereoReflectionParallax:
+        // slider -20..20 -> -2.0..+2.0 in 0.1 steps
+        getSettings().game.stereoReflectionParallax.setValue(
+            std::clamp(value, -20, 20) / 10.0f);
+        break;
     }
     config::Save();
 }
@@ -221,6 +226,13 @@ int get_graphics_setting_value(GraphicsOption option) {
         // hud depth slider -20..20 -> -20..20 game units (1 unit per click)
         return std::clamp(
             static_cast<int>(getSettings().game.stereoHudDepth.getValue() + 0.5f), -20, 20);
+    case GraphicsOption::StereoReflectionParallax: {
+        // stored as float -2.0..+2.0 -> slider int -20..+20 (0.1 steps).
+        // round-to-nearest with offset that handles negatives correctly.
+        const float v = getSettings().game.stereoReflectionParallax.getValue() * 10.0f;
+        const int rounded = static_cast<int>(v + (v >= 0.0f ? 0.5f : -0.5f));
+        return std::clamp(rounded, -20, 20);
+    }
     }
     return 0;
 }
@@ -287,6 +299,8 @@ Rml::String format_graphics_setting_value(GraphicsOption option, int value) {
         return fmt::format("{} units", value * 100);
     case GraphicsOption::StereoHudDepth:
         return fmt::format("{:+d} units", value);
+    case GraphicsOption::StereoReflectionParallax:
+        return fmt::format("{:+.1f}", value / 10.0f);
     }
     return "";
 }

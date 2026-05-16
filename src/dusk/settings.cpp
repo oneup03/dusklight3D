@@ -74,6 +74,12 @@ UserSettings g_userSettings = {
         .stereoEyeSeparation {"game.stereoEyeSeparation", 6.5f},
         .stereoConvergence {"game.stereoConvergence", 5000.0f},
         .stereoHudDepth {"game.stereoHudDepth", 0.0f},
+        // Multiplier on the per-eye texgen-matrix mtx[0][3] correction for
+        // reflective surfaces (water). -1.0 matches the pre-flip behavior
+        // (doubles view-shift parallax); 0.0 disables the correction (only
+        // view-shift parallax); +1.0/+2.0 try to cancel the view-shift
+        // parallax with increasing strength.
+        .stereoReflectionParallax {"game.stereoReflectionParallax", -1.0f},
 
         // Audio
         .noLowHpSound {"game.noLowHpSound", false},
@@ -240,6 +246,7 @@ void registerSettings() {
     Register(g_userSettings.game.stereoEyeSeparation);
     Register(g_userSettings.game.stereoConvergence);
     Register(g_userSettings.game.stereoHudDepth);
+    Register(g_userSettings.game.stereoReflectionParallax);
     Register(g_userSettings.game.enableFastIronBoots);
     Register(g_userSettings.game.canTransformAnywhere);
     Register(g_userSettings.game.fastRoll);

@@ -45,6 +45,17 @@ enum class FrameInterpMode : u8 {
     Unlimited = 2,
 };
 
+enum class StereoMode : int {
+    Off = 0,
+    SideBySide = 1,
+    TopBottom = 2,
+    RowInterlaced = 3,
+    ColumnInterlaced = 4,
+    Checkerboard = 5,
+    Anaglyph = 6,
+    LeiaSR = 7,
+};
+
 namespace config {
 template <>
 struct ConfigEnumRange<BloomMode> {
@@ -80,6 +91,12 @@ template <>
 struct ConfigEnumRange<FrameInterpMode> {
     static constexpr auto min = FrameInterpMode::Off;
     static constexpr auto max = FrameInterpMode::Unlimited;
+};
+
+template <>
+struct ConfigEnumRange<StereoMode> {
+    static constexpr auto min = StereoMode::Off;
+    static constexpr auto max = StereoMode::LeiaSR;
 };
 }  // namespace config
 
@@ -155,6 +172,10 @@ struct UserSettings {
         ConfigVar<bool> enableDepthOfField;
         ConfigVar<bool> enableMapBackground;
         ConfigVar<bool> disableCutscenePillarboxing;
+        ConfigVar<StereoMode> stereoMode;
+        ConfigVar<float> stereoEyeSeparation;
+        ConfigVar<float> stereoConvergence;
+        ConfigVar<float> stereoHudDepth;
 
         // Audio
         ConfigVar<bool> noLowHpSound;

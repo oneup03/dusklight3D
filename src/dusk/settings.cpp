@@ -67,6 +67,13 @@ UserSettings g_userSettings = {
         .enableDepthOfField {"game.enableDepthOfField", true},
         .enableMapBackground {"game.enableMapBackground", true},
         .disableCutscenePillarboxing {"game.disableCutscenePillarboxing", false},
+        .stereoMode {"game.stereoMode", StereoMode::Off},
+        // TP world is roughly centimeters (Link is ~200 units tall), so a
+        // human-realistic 6.5cm IPD is ~6.5 game units. Convergence in cm
+        // matches viewing distance; ~5000 units (~50m) fits outdoor scenes.
+        .stereoEyeSeparation {"game.stereoEyeSeparation", 6.5f},
+        .stereoConvergence {"game.stereoConvergence", 5000.0f},
+        .stereoHudDepth {"game.stereoHudDepth", 0.0f},
 
         // Audio
         .noLowHpSound {"game.noLowHpSound", false},
@@ -229,6 +236,10 @@ void registerSettings() {
     Register(g_userSettings.game.enableDepthOfField);
     Register(g_userSettings.game.enableMapBackground);
     Register(g_userSettings.game.disableCutscenePillarboxing);
+    Register(g_userSettings.game.stereoMode);
+    Register(g_userSettings.game.stereoEyeSeparation);
+    Register(g_userSettings.game.stereoConvergence);
+    Register(g_userSettings.game.stereoHudDepth);
     Register(g_userSettings.game.enableFastIronBoots);
     Register(g_userSettings.game.canTransformAnywhere);
     Register(g_userSettings.game.fastRoll);

@@ -481,14 +481,9 @@ void graphics_tuner_control(Window& window, Pane& leftPane, Pane& rightPane, Con
             .add_select_button({
                 .key = props.title,
                 .getValue =
-                    [&var, option = props.option] {
-                        if constexpr (std::is_same_v<T, float>) {
-                            return format_graphics_setting_value(
-                                option, float_setting_percent(var));
-                        } else {
-                            return format_graphics_setting_value(
-                                option, static_cast<int>(var.getValue()));
-                        }
+                    [option = props.option] {
+                        return format_graphics_setting_value(
+                            option, get_graphics_setting_value(option));
                     },
                 .isModified = [&var] { return var.getValue() != var.getDefaultValue(); },
                 .submit = false,
@@ -890,6 +885,43 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             {
                 .key = "Disable Cutscene Pillarboxing",
             });
+
+        leftPane.add_section("Stereoscopic 3D");
+        graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.stereoMode,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoMode,
+                .title = "Stereo Mode",
+                .helpText = "Render the scene twice per frame and combine the eyes for stereoscopic"
+                            " 3D output. Side-by-Side and Top-and-Bottom are for compatible 3D"
+                            " displays; Anaglyph is for red/cyan glasses; Interlaced and"
+                            " Checkerboard suit passive 3D monitors. The in-game UI is not"
+                            " stereo-aware.",
+                .valueMin = static_cast<int>(StereoMode::Off),
+                .valueMax = static_cast<int>(StereoMode::LeiaSR),
+                .defaultValue = static_cast<int>(StereoMode::Off),
+            }, mPrelaunch);
+        graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.stereoEyeSeparation,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoEyeSeparation,
+                .title = "Eye Separation",
+                .helpText = "Distance between the left and right eye cameras, in world units."
+                            " TP world units are roughly centimeters; a human IPD of about 6cm"
+                            " corresponds to ~6 units. Higher values produce a stronger 3D effect.",
+                .valueMin = 0,
+                .valueMax = 30,
+                .defaultValue = 6,
+            }, mPrelaunch);
+        graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.stereoConvergence,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoConvergence,
+                .title = "Convergence",
+                .helpText = "Distance at which objects appear flush with the screen, in world"
+                            " units (each step is 100 units, ~1m). Closer values bring nearer"
+                            " geometry forward; farther values push everything into the screen.",
+                .valueMin = 1,
+                .valueMax = 1000,
+                .defaultValue = 50, // 50 * 100 = 5000 world units, ~50m
+            }, mPrelaunch);
     });
 
     add_tab("Input", [this](Rml::Element* content) {

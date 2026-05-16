@@ -2510,6 +2510,15 @@ int mDoGph_Painter() {
 
                 cMtx_lookAt(m2, &sp38c, &cXyz::Zero, &sp398, 0);
                 j3dSys.setViewMtx(m2);
+                // Note: dComIfGd_drawXluList2DScreen here uses hardcoded view
+                // and projection (m2 / m above), independent of camera_p->view.
+                // In stereo mode this means any geometry in the 2DScreen
+                // drawlist (the underwater shimmer model, kytag15 effects) is
+                // rendered without per-eye parallax -- it sits at screen depth
+                // instead of the actual water-surface depth. This is a known
+                // limitation of Phase 1 stereo support; correctly fixing it
+                // would require per-shader stereo fixes (TPHD-3D-style) which
+                // Aurora doesn't have hook points for.
                 GX_DEBUG_GROUP(dComIfGd_drawXluList2DScreen);
 
                 j3dSys.setViewMtx(camera_p->view.viewMtx);

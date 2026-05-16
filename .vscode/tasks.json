@@ -1,51 +1,53 @@
 {
-  // Use Ctrl+Shift+B to run build tasks.
-  // Or "Run Build Task" in the Command Palette.
+  // Ctrl+Shift+B runs the default build task ("CMake: Build (RelWithDebInfo)").
+  // Each task sources vcvars64.bat so MSVC (cl.exe) is on PATH for Ninja.
   "version": "2.0.0",
-  "inputs": [
-    {
-        "id": "gameVersion",
-        "type": "pickString",
-        "options": [
-            "GZ2E01",    // GCN USA
-            "GZ2P01",    // GCN PAL
-            "GZ2J01",    // GCN JPN
-            "RZDE01_00", // Wii USA Rev 0
-            "RZDE01_02", // Wii USA Rev 2
-            "RZDP01",    // Wii PAL
-            "RZDJ01",    // Wii JPN
-            //"RZDK01",    // Wii KOR
-            //"DZDE01",    // Wii USA Kiosk Demo
-            //"DZDP01",    // Wii PAL Kiosk Demo
-            "Shield",    // Shield
-            //"ShieldP",   // Shield Production
-            "ShieldD",   // Shield Debug
-        ],
-        "default": "GZ2E01",
-        "description": "Game version to build."
-    },
-  ],
+  "options": {
+    "shell": {
+      "executable": "cmd.exe",
+      "args": ["/d", "/c"]
+    }
+  },
   "tasks": [
     {
-      "label": "ninja",
+      "label": "CMake: Configure (RelWithDebInfo)",
       "type": "shell",
-      "command": "ninja",
+      "command": "\"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && cmake --preset windows-msvc-relwithdebinfo",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "CMake: Configure (Debug)",
+      "type": "shell",
+      "command": "\"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && cmake --preset windows-msvc-debug",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "CMake: Build (RelWithDebInfo)",
+      "type": "shell",
+      "command": "\"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && cmake --build --preset windows-msvc-relwithdebinfo",
+      "options": { "cwd": "${workspaceFolder}" },
       "group": {
         "kind": "build",
         "isDefault": true
-      }
+      },
+      "problemMatcher": "$msCompile"
     },
     {
-      "label": "configure",
+      "label": "CMake: Build (Debug)",
       "type": "shell",
-      "command": "${command:python.interpreterPath} configure.py --version ${input:gameVersion}",
-      "problemMatcher": [],
+      "command": "\"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && cmake --build --preset windows-msvc-debug",
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "problemMatcher": "$msCompile"
     },
     {
-      "label": "ninja changes_all",
+      "label": "CMake: Clean (RelWithDebInfo)",
       "type": "shell",
-      "command": "ninja changes_all",
-      "problemMatcher": [],
-    },
+      "command": "\"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\" >nul && cmake --build --preset windows-msvc-relwithdebinfo --target clean",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    }
   ]
 }

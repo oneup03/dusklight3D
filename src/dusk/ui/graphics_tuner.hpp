@@ -45,9 +45,17 @@ enum class GraphicsOption {
     Resampler,
     BloomMode,
     BloomMultiplier,
+    StereoMode,
+    StereoEyeSeparation,
+    StereoConvergence,
+    StereoHudDepth,
 };
 
 Rml::String format_graphics_setting_value(GraphicsOption option, int value);
+
+// Read the integer representation of an option for use with the carousel and
+// formatter. Matches set_value()'s expected input range.
+int get_graphics_setting_value(GraphicsOption option);
 
 struct GraphicsTunerProps {
     GraphicsOption option;

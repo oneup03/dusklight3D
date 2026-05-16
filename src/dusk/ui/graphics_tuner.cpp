@@ -10,6 +10,7 @@
 
 #include "dusk/config.hpp"
 #include "dusk/settings.h"
+#include "dusk/stereo.h"
 
 #include <algorithm>
 #include <string>
@@ -37,24 +38,6 @@ const Rml::String kDocumentSource = R"RML(
 </body>
 </rml>
 )RML";
-
-int get_value(GraphicsOption option) {
-    switch (option) {
-    case GraphicsOption::InternalResolution:
-        return getSettings().game.internalResolutionScale.getValue();
-    case GraphicsOption::ShadowResolution:
-        return getSettings().game.shadowResolutionMultiplier.getValue();
-    case GraphicsOption::Resampler:
-        return static_cast<int>(getSettings().game.resampler.getValue());
-    case GraphicsOption::BloomMode:
-        return static_cast<int>(getSettings().game.bloomMode.getValue());
-    case GraphicsOption::BloomMultiplier:
-        return std::clamp(
-            static_cast<int>(getSettings().game.bloomMultiplier.getValue() * 100.0f + 0.5f), 0,
-            100);
-    }
-    return 0;
-}
 
 void set_value(GraphicsOption option, int value) {
     switch (option) {
@@ -87,6 +70,31 @@ void set_value(GraphicsOption option, int value) {
         break;
     case GraphicsOption::BloomMultiplier:
         getSettings().game.bloomMultiplier.setValue(std::clamp(value, 0, 100) / 100.0f);
+        break;
+    case GraphicsOption::StereoMode: {
+        auto mode = static_cast<StereoMode>(std::clamp(
+            value, static_cast<int>(StereoMode::Off), static_cast<int>(StereoMode::LeiaSR)));
+        if (mode == StereoMode::LeiaSR && !aurora_stereo_mode_supported(AURORA_STEREO_LEIASR)) {
+            mode = StereoMode::Off;
+        }
+        getSettings().game.stereoMode.setValue(mode);
+        stereo::apply_config_from_settings();
+        break;
+    }
+    case GraphicsOption::StereoEyeSeparation:
+        getSettings().game.stereoEyeSeparation.setValue(
+            static_cast<float>(std::clamp(value, 0, 30)));
+        stereo::apply_config_from_settings();
+        break;
+    case GraphicsOption::StereoConvergence:
+        getSettings().game.stereoConvergence.setValue(
+            static_cast<float>(std::clamp(value, 1, 1000) * 100));
+        stereo::apply_config_from_settings();
+        break;
+    case GraphicsOption::StereoHudDepth:
+        getSettings().game.stereoHudDepth.setValue(
+            static_cast<float>(std::clamp(value, -20, 20)));
+        stereo::apply_config_from_settings();
         break;
     }
     config::Save();
@@ -182,6 +190,41 @@ void SteppedCarousel::apply(int value) {
     }
 }
 
+int get_graphics_setting_value(GraphicsOption option) {
+    switch (option) {
+    case GraphicsOption::InternalResolution:
+        return getSettings().game.internalResolutionScale.getValue();
+    case GraphicsOption::ShadowResolution:
+        return getSettings().game.shadowResolutionMultiplier.getValue();
+    case GraphicsOption::Resampler:
+        return static_cast<int>(getSettings().game.resampler.getValue());
+    case GraphicsOption::BloomMode:
+        return static_cast<int>(getSettings().game.bloomMode.getValue());
+    case GraphicsOption::BloomMultiplier:
+        return std::clamp(
+            static_cast<int>(getSettings().game.bloomMultiplier.getValue() * 100.0f + 0.5f), 0,
+            100);
+    case GraphicsOption::StereoMode:
+        return static_cast<int>(getSettings().game.stereoMode.getValue());
+    case GraphicsOption::StereoEyeSeparation:
+        // separation slider 0..30 -> 0..30 game units (TP is roughly cm, so
+        // human IPD ~6 game units).
+        return std::clamp(
+            static_cast<int>(getSettings().game.stereoEyeSeparation.getValue() + 0.5f), 0, 30);
+    case GraphicsOption::StereoConvergence:
+        // convergence slider 1..1000 -> 100..100000 game units (step 100, i.e.
+        // ~1m per click; TP world is roughly cm-scale).
+        return std::clamp(
+            static_cast<int>(getSettings().game.stereoConvergence.getValue() / 100.0f + 0.5f), 1,
+            1000);
+    case GraphicsOption::StereoHudDepth:
+        // hud depth slider -20..20 -> -20..20 game units (1 unit per click)
+        return std::clamp(
+            static_cast<int>(getSettings().game.stereoHudDepth.getValue() + 0.5f), -20, 20);
+    }
+    return 0;
+}
+
 Rml::String format_graphics_setting_value(GraphicsOption option, int value) {
     switch (option) {
     case GraphicsOption::InternalResolution: {
@@ -216,6 +259,34 @@ Rml::String format_graphics_setting_value(GraphicsOption option, int value) {
         break;
     case GraphicsOption::BloomMultiplier:
         return fmt::format("{}%", value);
+    case GraphicsOption::StereoMode:
+        switch (static_cast<StereoMode>(value)) {
+        case StereoMode::Off:
+            return "Off";
+        case StereoMode::SideBySide:
+            return "Side-by-Side";
+        case StereoMode::TopBottom:
+            return "Top-and-Bottom";
+        case StereoMode::RowInterlaced:
+            return "Row Interlaced";
+        case StereoMode::ColumnInterlaced:
+            return "Column Interlaced";
+        case StereoMode::Checkerboard:
+            return "Checkerboard";
+        case StereoMode::Anaglyph:
+            return "Anaglyph (Red/Cyan)";
+        case StereoMode::LeiaSR:
+            return aurora_stereo_mode_supported(AURORA_STEREO_LEIASR)
+                       ? "LeiaSR"
+                       : "LeiaSR (unavailable)";
+        }
+        break;
+    case GraphicsOption::StereoEyeSeparation:
+        return fmt::format("{} units", value);
+    case GraphicsOption::StereoConvergence:
+        return fmt::format("{} units", value * 100);
+    case GraphicsOption::StereoHudDepth:
+        return fmt::format("{:+d} units", value);
     }
     return "";
 }
@@ -239,7 +310,7 @@ GraphicsTuner::GraphicsTuner(GraphicsTunerProps props, bool prelaunch)
                 .min = mValueMin,
                 .max = mValueMax,
                 .step = props.step,
-                .getValue = [this] { return get_value(mOption); },
+                .getValue = [this] { return get_graphics_setting_value(mOption); },
                 .onChange = [this](int value) { set_value(mOption, value); },
                 .formatValue =
                     [this](int value) { return format_graphics_setting_value(mOption, value); },

@@ -10,6 +10,9 @@
 #include "d/d_com_inf_game.h"
 #include "d/d_debug_viewer.h"
 #include "m_Do/m_Do_graphic.h"
+#ifdef TARGET_PC
+#include "dusk/stereo.h"
+#endif
 
 static u32 const l_bmd[2] = {5, 5};
 
@@ -321,7 +324,19 @@ int daObjMHole_c::draw() {
                     #if WIDESCREEN_SUPPORT
                     mDoGph_gInf_c::setWideZoomLightProjection(effect_mtx);
                     #endif
+#ifdef TARGET_PC
+                    // Same screen-space refraction texgen pattern as the
+                    // groundwater / lv3Water actors -- register with the
+                    // painter funnel so mEffectMtx + the DL are rebuilt per
+                    // eye. Without this, the manhole-style water effect
+                    // (used in Ordon Village's wells and similar small water
+                    // patches) shows the player's submerged legs at the
+                    // wrong screen position per eye, producing the same
+                    // "duplicate leg" artifact as the JPA refraction splashes.
+                    dusk::stereo::apply_eye_to_reflection_effect_mtx(effect_mtx, tex_mtx_info, mpModel);
+#else
                     tex_mtx_info->setEffectMtx(effect_mtx);
+#endif
                     modelData->simpleCalcMaterial((MtxP)j3dDefaultMtx);
                 }
             }

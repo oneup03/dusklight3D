@@ -66,6 +66,7 @@ void apply_eye_to_halo_effect_mtx(Mtx mtx, ::J3DTexMtxInfo* info, ::J3DModel* mo
 // off so callers can unconditionally add it back without branching.
 f32 current_eye_offset_x();
 
+
 // Depth-aware per-particle correction for any screen-space-projection
 // texgen built like `mtx = LightPerspective * camera_space_srt` and
 // sampled at billboard corners (the JPA refraction pattern in

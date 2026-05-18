@@ -9,9 +9,6 @@
 #include "d/d_bg_w.h"
 #include "d/d_com_inf_game.h"
 #include "m_Do/m_Do_graphic.h"
-#ifdef TARGET_PC
-#include "dusk/stereo.h"
-#endif
 
 void daObjRotStair_c::initBaseMtx() {
     mWaterModels[0]->setBaseScale(scale);
@@ -321,11 +318,7 @@ int daObjRotStair_c::Draw() {
                 #if WIDESCREEN_SUPPORT
                 mDoGph_gInf_c::setWideZoomLightProjection(lightMtx);
                 #endif
-#ifdef TARGET_PC
-                dusk::stereo::apply_eye_to_reflection_effect_mtx(lightMtx, texMtxInfo, mWaterModels[1]);
-#else
                 texMtxInfo->setEffectMtx(lightMtx);
-#endif
                 modelData->simpleCalcMaterial(0, (MtxP)j3dDefaultMtx);
             }
         }

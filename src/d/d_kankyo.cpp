@@ -35,7 +35,6 @@
 #if TARGET_PC
 #include "dusk/imgui/ImGuiBloomWindow.hpp"
 #include "dusk/settings.h"
-#include "dusk/stereo.h"
 #include "dusk/frame_interpolation.h"
 #include "dusk/game_clock.h"
 #endif
@@ -11431,17 +11430,7 @@ void dKy_bg_MAxx_proc(void* bg_model_p) {
                             #if WIDESCREEN_SUPPORT
                             mDoGph_gInf_c::setWideZoomLightProjection(sp1D8);
                             #endif
-#ifdef TARGET_PC
-                            // Generic water reflection (MA10 / MA02 materials).
-                            // Register (model, info, base) so the painter
-                            // funnel rebuilds the model's DL per eye -- the DL
-                            // caches the matrix, so a one-shot setEffectMtx
-                            // would only fix the eye whose correction happened
-                            // to be active when the actor Draw ran.
-                            dusk::stereo::apply_eye_to_reflection_effect_mtx(sp1D8, tex_mtx_inf, model_p);
-#else
                             tex_mtx_inf->setEffectMtx(sp1D8);
-#endif
                             modelData->simpleCalcMaterial((MtxP)j3dDefaultMtx);
                         }
                     }
@@ -11612,17 +11601,7 @@ void dKy_bg_MAxx_proc(void* bg_model_p) {
                                           player_p->current.pos.z);
                                 cMtx_lookAt(sp118, &spC0, &spD8, 0);
                                 cMtx_concat(sp148, sp118, sp118);
-#ifdef TARGET_PC
-                                // MA20 player-centered halo. Composite matrix
-                                // has q row (0, -1, 0, player.y), not the
-                                // standard (0, 0, -1, 0), so use the halo
-                                // variant which applies a sign-flipped
-                                // correction (otherwise the halo looks
-                                // mirrored between eyes).
-                                dusk::stereo::apply_eye_to_halo_effect_mtx(sp118, tex_mtx_inf, model_p);
-#else
                                 tex_mtx_inf->setEffectMtx(sp118);
-#endif
                             }
                         }
                     }

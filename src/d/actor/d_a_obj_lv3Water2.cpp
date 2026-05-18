@@ -10,9 +10,6 @@
 #include "f_ap/f_ap_game.h"
 #include "f_op/f_op_msg_mng.h"
 #include "m_Do/m_Do_graphic.h"
-#ifdef TARGET_PC
-#include "dusk/stereo.h"
-#endif
 
 struct daLv3Water2_HIO_c : public mDoHIO_entry_c {
     daLv3Water2_HIO_c();
@@ -219,14 +216,7 @@ int daLv3Water2_c::Draw() {
             }
             #endif
 
-#ifdef TARGET_PC
-            // Lv3 water 2 (refraction) reflection -- register with the
-            // painter funnel so mEffectMtx + DL get rebuilt per eye with
-            // the per-eye-corrected matrix.
-            dusk::stereo::apply_eye_to_reflection_effect_mtx(lightProjMtx, texMtxInfo, mpModel);
-#else
             texMtxInfo->setEffectMtx(lightProjMtx);
-#endif
             modelData->simpleCalcMaterial(const_cast<MtxP>(j3dDefaultMtx));
         }
     }

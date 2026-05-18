@@ -58,7 +58,7 @@ UserSettings g_userSettings = {
         // Graphics
         .bloomMode {"game.bloomMode", BloomMode::Dusk},
         .bloomMultiplier {"game.bloomMultiplier", 1.0f},
-        .disableWaterRefraction {"game.disableWaterRefraction", false},
+        .disableWaterRefraction {"game.disableWaterRefraction", true},
         .enableTextureReplacements {"game.enableTextureReplacements", true},
         .enableFrameInterpolation {"game.enableFrameInterpolation", FrameInterpMode::Off},
         .internalResolutionScale {"game.internalResolutionScale", 0},
@@ -74,7 +74,6 @@ UserSettings g_userSettings = {
         .stereoEyeSeparation {"game.stereoEyeSeparation", 6.5f},
         .stereoConvergence {"game.stereoConvergence", 5000.0f},
         .stereoHudDepth {"game.stereoHudDepth", 0.0f},
-        // Multiplier on the per-eye texgen-matrix mtx[0][3] correction for
         // Audio
         .noLowHpSound {"game.noLowHpSound", false},
         .midnasLamentNonStop {"game.midnasLamentNonStop", false},

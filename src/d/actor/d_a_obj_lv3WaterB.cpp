@@ -12,9 +12,6 @@
 #include "d/d_s_play.h"
 #include "f_op/f_op_actor.h"
 #include "f_op/f_op_actor_mng.h"
-#ifdef TARGET_PC
-#include "dusk/stereo.h"
-#endif
 
 static int daObj_Lv3waterB_Draw(obj_lv3WaterB_class* i_this) {
     fopAc_ac_c* const actor = i_this;
@@ -35,16 +32,7 @@ static int daObj_Lv3waterB_Draw(obj_lv3WaterB_class* i_this) {
             #if WIDESCREEN_SUPPORT
             mDoGph_gInf_c::setWideZoomLightProjection(m);
             #endif
-#ifdef TARGET_PC
-            // Bake per-eye parallax into this water-reflection texgen. The
-            // helper registers (model, info, base) so the painter funnel can
-            // rewrite mEffectMtx AND rebuild the model's DL per eye -- the
-            // DL caches the matrix, so updating mEffectMtx alone wouldn't
-            // affect what either eye renders.
-            dusk::stereo::apply_eye_to_reflection_effect_mtx(m, tex_mtx_info, i_this->mpBWaterModel);
-#else
             tex_mtx_info->setEffectMtx(m);
-#endif
             i_this->mpBWaterModel->getModelData()->simpleCalcMaterial((MtxP)j3dDefaultMtx);
         }
     }

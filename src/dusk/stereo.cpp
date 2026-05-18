@@ -53,11 +53,15 @@ bool active() {
 }
 
 void apply_config_from_settings() {
+    // stereoHudDepth slider value -20..20 maps to UV-space horizontal parallax
+    // -0.02..0.02 (i.e. up to 2% of screen width). Positive = HUD pops in
+    // front of the screen plane.
+    const f32 hudDepthUv = getSettings().game.stereoHudDepth.getValue() * 0.001f;
     const AuroraStereoConfig cfg{
         .mode = current_mode(),
         .eyeSeparation = getSettings().game.stereoEyeSeparation.getValue(),
         .convergence = getSettings().game.stereoConvergence.getValue(),
-        .hudDepth = getSettings().game.stereoHudDepth.getValue(),
+        .hudDepth = hudDepthUv,
     };
     aurora_set_stereo_config(&cfg);
 }

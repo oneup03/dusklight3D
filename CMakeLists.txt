@@ -570,6 +570,24 @@ endif ()
 include(extern/aurora/cmake/AuroraCopyRuntimeDLLs.cmake)
 aurora_copy_runtime_dlls(dusklight)
 
+# LeiaSR runtime DLLs are delay-loaded so dusklight.exe still runs on machines
+# without the SDK runtime installed. At runtime they're discovered via the user's
+# PATH (the LeiaSR installer adds Platform/bin).
+if (WIN32 AND LEIASR_SDKROOT AND MSVC)
+    target_link_options(dusklight PRIVATE
+        /DELAYLOAD:simulatedreality.dll
+        /DELAYLOAD:SimulatedRealityCore.dll
+        /DELAYLOAD:SimulatedRealityDirectX.dll
+        /DELAYLOAD:SimulatedRealityCameras.dll
+        /DELAYLOAD:SimulatedRealityDisplays.dll
+        /DELAYLOAD:SimulatedRealityFaceTrackers.dll
+        /DELAYLOAD:SimulatedRealityHandTrackers.dll
+        /DELAYLOAD:SimulatedRealityUserModelers.dll
+        /DELAYLOAD:DimencoWeaving.dll
+    )
+    target_link_libraries(dusklight PRIVATE delayimp.lib)
+endif ()
+
 if (DUSK_SELECTED_OPT)
     if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
         set(_opt_flags /O2 /Ob2)

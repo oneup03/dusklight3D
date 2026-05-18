@@ -72,11 +72,12 @@ void set_value(GraphicsOption option, int value) {
         getSettings().game.bloomMultiplier.setValue(std::clamp(value, 0, 100) / 100.0f);
         break;
     case GraphicsOption::StereoMode: {
-        auto mode = static_cast<StereoMode>(std::clamp(
+        // Allow selecting LeiaSR even when no Leia display is currently detected;
+        // format_graphics_setting_value renders it as "LeiaSR (unavailable)" and the
+        // present path silently falls back to the mono fast-path until an SR display
+        // appears (so plugging one in just starts working without re-picking).
+        const auto mode = static_cast<StereoMode>(std::clamp(
             value, static_cast<int>(StereoMode::Off), static_cast<int>(StereoMode::LeiaSR)));
-        if (mode == StereoMode::LeiaSR && !aurora_stereo_mode_supported(AURORA_STEREO_LEIASR)) {
-            mode = StereoMode::Off;
-        }
         getSettings().game.stereoMode.setValue(mode);
         stereo::apply_config_from_settings();
         break;

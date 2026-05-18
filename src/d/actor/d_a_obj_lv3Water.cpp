@@ -19,9 +19,6 @@
 #include "CaptureScreen.h"
 #endif
 
-#ifdef TARGET_PC
-#include "dusk/stereo.h"
-#endif
 
 class daLv3Water_HIO_c : public mDoHIO_entry_c {
 public:
@@ -395,14 +392,7 @@ int daLv3Water_c::Draw() {
                 }
                 #endif
 
-#ifdef TARGET_PC
-                // Lv3 water reflection -- register with the painter funnel so
-                // mEffectMtx + the model's DL are rebuilt per eye with the
-                // per-eye-corrected matrix.
-                dusk::stereo::apply_eye_to_reflection_effect_mtx(lightProjMtx, texMtxInfo, mpModel2);
-#else
                 texMtxInfo->setEffectMtx(lightProjMtx);
-#endif
                 modelData->simpleCalcMaterial((MtxP)j3dDefaultMtx);
             }
         }

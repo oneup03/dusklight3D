@@ -17,15 +17,9 @@ void cAPIGph_Painter() {
         for (AuroraEye eye : {AURORA_EYE_LEFT, AURORA_EYE_RIGHT}) {
             aurora_set_active_eye(eye);
             dusk::stereo::push_eye_offset(eye);
-            // Reflection texgens were registered by actor Draws that ran
-            // once (before the eye loop). Re-derive their mEffectMtx for the
-            // current eye so each iteration's painter renders with the
-            // matching matrix instead of both eyes sharing one.
-            dusk::stereo::apply_reflection_corrections_for_eye(eye);
             g_cAPI_Interface.painterMtd();
             dusk::stereo::pop_eye_offset();
         }
-        dusk::stereo::clear_reflection_registry();
         return;
     }
 #endif

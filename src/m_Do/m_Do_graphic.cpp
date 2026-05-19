@@ -57,6 +57,7 @@
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/logging.h"
 #include "dusk/settings.h"
+#include "dusk/stereo.h"
 #endif
 
 class mDoGph_HIO_c : public JORReflexible {
@@ -2128,9 +2129,19 @@ int mDoGph_Painter() {
     GXSetDither(GX_ENABLE);
 
     J2DOrthoGraph ortho(0.0f, 0.0f, FB_WIDTH, FB_HEIGHT, -1.0f, 1.0f);
-    ortho.setOrtho(mDoGph_gInf_c::getMinXF(), mDoGph_gInf_c::getMinYF(),
-                   mDoGph_gInf_c::getWidthF(), mDoGph_gInf_c::getHeightF(),
-                   -1.0f, 1.0f);
+    {
+#if TARGET_PC
+        // Shift the 2D ortho bounds horizontally per eye when stereo + HUD
+        // depth are active so hearts, rupees, button hints and the mini-map
+        // get a fixed parallax depth (positive = pops forward).
+        const f32 hudShift = dusk::stereo::hud_ortho_shift_x();
+#else
+        constexpr f32 hudShift = 0.0f;
+#endif
+        ortho.setOrtho(mDoGph_gInf_c::getMinXF() + hudShift, mDoGph_gInf_c::getMinYF(),
+                       mDoGph_gInf_c::getWidthF(), mDoGph_gInf_c::getHeightF(),
+                       -1.0f, 1.0f);
+    }
     ortho.setPort();
 
     #if DEBUG
@@ -2672,9 +2683,18 @@ int mDoGph_Painter() {
     }
     j3dSys.reinitGX();
 
-    ortho.setOrtho(mDoGph_gInf_c::getMinXF(), mDoGph_gInf_c::getMinYF(),
-                   mDoGph_gInf_c::getWidthF(), mDoGph_gInf_c::getHeightF(),
-                   100000.0f, -100000.0f);
+    {
+#if TARGET_PC
+        // Per-eye HUD parallax shift -- see the earlier setOrtho in this file
+        // for the rationale.
+        const f32 hudShift = dusk::stereo::hud_ortho_shift_x();
+#else
+        constexpr f32 hudShift = 0.0f;
+#endif
+        ortho.setOrtho(mDoGph_gInf_c::getMinXF() + hudShift, mDoGph_gInf_c::getMinYF(),
+                       mDoGph_gInf_c::getWidthF(), mDoGph_gInf_c::getHeightF(),
+                       100000.0f, -100000.0f);
+    }
     ortho.setPort();
 
     #if DEBUG

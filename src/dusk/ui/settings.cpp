@@ -905,23 +905,50 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .option = GraphicsOption::StereoEyeSeparation,
                 .title = "Eye Separation",
                 .helpText = "Distance between the left and right eye cameras, in world units."
-                            " TP world units are roughly centimeters; a human IPD of about 6cm"
-                            " corresponds to ~6 units. Higher values produce a stronger 3D effect.",
+                            " TP world units are roughly centimeters. Higher values produce a"
+                            " stronger 3D effect.",
                 .valueMin = 0,
-                .valueMax = 30,
-                .defaultValue = 6,
+                .valueMax = 100,
+                .defaultValue = 30,
             }, mPrelaunch);
         graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.stereoConvergence,
             GraphicsTunerProps{
                 .option = GraphicsOption::StereoConvergence,
                 .title = "Convergence",
                 .helpText = "Distance at which objects appear flush with the screen, in world"
-                            " units (each step is 100 units, ~1m). Closer values bring nearer"
+                            " units. Each step is 25 units (~25cm). Closer values bring nearer"
                             " geometry forward; farther values push everything into the screen.",
                 .valueMin = 1,
-                .valueMax = 1000,
-                .defaultValue = 50, // 50 * 100 = 5000 world units, ~50m
+                .valueMax = 60,
+                .defaultValue = 12, // 12 * 25 = 300 world units, ~3m
             }, mPrelaunch);
+        graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.stereoHudDepth,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoHudDepth,
+                .title = "HUD Depth",
+                .helpText = "Push the HUD in front of (positive) or behind (negative) the screen"
+                            " plane. 0 keeps the HUD flat on the screen. Each step is ~0.1% of"
+                            " screen width per eye.",
+                .valueMin = -30,
+                .valueMax = 30,
+                .defaultValue = -10,
+            }, mPrelaunch);
+        graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.stereoFpSeparationScale,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoFpSeparationScale,
+                .title = "Close-Up Eye Sep Scale",
+                .helpText = "Multiplier on Eye Separation applied when a close-up subject dominates"
+                            " the frame: first-person aim modes (bow, slingshot, clawshot, dominion"
+                            " rod) and any open dialog/message box. Lower values reduce parallax so"
+                            " near content doesn't strain the eyes. Default 10%.",
+                .valueMin = 1,
+                .valueMax = 35,
+                .defaultValue = 10,
+            }, mPrelaunch);
+        config_bool_select(leftPane, rightPane, getSettings().game.enableAutoConvergence,
+            {
+                .key = "Auto-Convergence",
+            });
     });
 
     add_tab("Input", [this](Rml::Element* content) {

@@ -4,6 +4,8 @@
 #include <aurora/aurora.h>
 #include <mtx.h>
 
+#include "SSystem/SComponent/c_xyz.h"
+
 namespace dusk::stereo {
 
 // True when the user-selected stereo mode is anything other than Off.
@@ -39,6 +41,52 @@ void pop_eye_offset();
 //
 // Returns 0 when stereo is off or convergence is degenerate.
 f32 refraction_skew_correction_x(f32 srt_z_view);
+
+// True when something close to the camera dominates the frame (FP aim, open
+// dialog, pause/inventory, item-get sequence, NPC talk). Triggers the
+// "Close-Up Eye Sep Scale" reduction this frame. Public so diagnostic /
+// debug code can ask the same question dusk::stereo uses internally.
+bool is_close_up_focus_active();
+
+// Per-eye amount to ADD to the J2D ortho left/right bounds to give the
+// in-game HUD (hearts, rupees, button hints, mini-map) a fixed parallax
+// depth. Drives the user's stereoHudDepth slider in pixel-space (1 unit ~=
+// 0.1% of viewport width). Returns 0 when stereo is off or hudDepth is 0.
+//
+// Positive hudDepth = HUD pops in front of the screen plane: the right eye
+// view sees the HUD shifted LEFT relative to the left eye, which the brain
+// fuses as negative parallax. Apply by adding the returned value to BOTH the
+// left and right ortho bounds before setOrtho().
+f32 hud_ortho_shift_x();
+
+// Per-eye horizontal screen-pixel shift for a world-space point projected
+// through the UNSHIFTED center camera (the projection cached by
+// `mDoLib_project` when actor draws run before the per-eye painter loop).
+// Add this to a J2D pane translate inside `dComIfGd_draw2DXlu` so world-
+// anchored 2D-XLU elements (e.g. boomerang lock cursors) get the same depth
+// parallax as the 3D scene around them. Returns 0 when stereo is off, the
+// point is behind the camera, or convergence is degenerate.
+//
+// Formula (derivation matches push_eye_offset's view translate + projMtx
+// skew):
+//   ΔNDC.x_eye = eyeOffsetX * projMtx[0][0] * (1/z_view + 1/convergence)
+//   ΔPixels    = ΔNDC.x_eye * viewport_width / 2
+// Sign convention: LEFT eye has eyeOffsetX = -sep/2, RIGHT eye has +sep/2.
+// At z_view = -convergence the shift is zero (zero-parallax plane); points
+// closer than convergence pop forward, farther points recede.
+f32 screen_parallax_x_for_world_pos(const cXyz& world_pos);
+
+// Adjust the active convergence each simulation frame based on what the
+// player is looking at. Priority chain:
+//   1. Z-target lock-on actor distance
+//   2. Aim mode (bow/slingshot/clawshot) sight hit-point distance
+//   3. Cutscene/event camera lookat distance
+//   4. Dialog open -> freeze (skip update, avoids text-box jumps)
+//   5. Fallback: depth at screen center via GXPeekZ
+// Smoothed with the user's autoConvergenceSmoothing time constant. No-op when
+// enableAutoConvergence is false. Call once per simulation frame BEFORE the
+// painter funnel starts the eye loop.
+void auto_convergence_tick();
 
 } // namespace dusk::stereo
 

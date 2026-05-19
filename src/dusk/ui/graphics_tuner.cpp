@@ -13,6 +13,7 @@
 #include "dusk/stereo.h"
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 
 namespace dusk::ui {
@@ -84,17 +85,23 @@ void set_value(GraphicsOption option, int value) {
     }
     case GraphicsOption::StereoEyeSeparation:
         getSettings().game.stereoEyeSeparation.setValue(
-            static_cast<float>(std::clamp(value, 0, 30)));
+            static_cast<float>(std::clamp(value, 0, 100)));
         stereo::apply_config_from_settings();
         break;
     case GraphicsOption::StereoConvergence:
         getSettings().game.stereoConvergence.setValue(
-            static_cast<float>(std::clamp(value, 1, 1000) * 100));
+            static_cast<float>(std::clamp(value, 1, 60) * 25));
         stereo::apply_config_from_settings();
         break;
     case GraphicsOption::StereoHudDepth:
         getSettings().game.stereoHudDepth.setValue(
-            static_cast<float>(std::clamp(value, -20, 20)));
+            static_cast<float>(std::clamp(value, -30, 30)));
+        stereo::apply_config_from_settings();
+        break;
+    case GraphicsOption::StereoFpSeparationScale:
+        // Slider value 1..35 -> stored scale 0.01..0.35 (each step = 1%).
+        getSettings().game.stereoFpSeparationScale.setValue(
+            static_cast<float>(std::clamp(value, 1, 35)) * 0.01f);
         stereo::apply_config_from_settings();
         break;
     }
@@ -208,20 +215,23 @@ int get_graphics_setting_value(GraphicsOption option) {
     case GraphicsOption::StereoMode:
         return static_cast<int>(getSettings().game.stereoMode.getValue());
     case GraphicsOption::StereoEyeSeparation:
-        // separation slider 0..30 -> 0..30 game units (TP is roughly cm, so
-        // human IPD ~6 game units).
+        // separation slider 0..100 -> 0..100 game units (TP is roughly cm).
         return std::clamp(
-            static_cast<int>(getSettings().game.stereoEyeSeparation.getValue() + 0.5f), 0, 30);
+            static_cast<int>(getSettings().game.stereoEyeSeparation.getValue() + 0.5f), 0, 100);
     case GraphicsOption::StereoConvergence:
-        // convergence slider 1..1000 -> 100..100000 game units (step 100, i.e.
-        // ~1m per click; TP world is roughly cm-scale).
+        // convergence slider 1..60 -> 25..1500 game units (step 25 = ~25cm).
         return std::clamp(
-            static_cast<int>(getSettings().game.stereoConvergence.getValue() / 100.0f + 0.5f), 1,
-            1000);
+            static_cast<int>(getSettings().game.stereoConvergence.getValue() / 25.0f + 0.5f), 1,
+            60);
     case GraphicsOption::StereoHudDepth:
-        // hud depth slider -20..20 -> -20..20 game units (1 unit per click)
+        // hud depth slider -30..30 -> -30..30 game units (1 unit per click)
         return std::clamp(
-            static_cast<int>(getSettings().game.stereoHudDepth.getValue() + 0.5f), -20, 20);
+            static_cast<int>(std::round(getSettings().game.stereoHudDepth.getValue())), -30, 30);
+    case GraphicsOption::StereoFpSeparationScale:
+        // 0.01..0.35 stored -> slider value 1..35
+        return std::clamp(
+            static_cast<int>(std::round(getSettings().game.stereoFpSeparationScale.getValue() * 100.0f)),
+            1, 35);
     }
     return 0;
 }
@@ -285,9 +295,11 @@ Rml::String format_graphics_setting_value(GraphicsOption option, int value) {
     case GraphicsOption::StereoEyeSeparation:
         return fmt::format("{} units", value);
     case GraphicsOption::StereoConvergence:
-        return fmt::format("{} units", value * 100);
+        return fmt::format("{} units", value * 25);
     case GraphicsOption::StereoHudDepth:
         return fmt::format("{:+d} units", value);
+    case GraphicsOption::StereoFpSeparationScale:
+        return fmt::format("{}%", value);
     }
     return "";
 }

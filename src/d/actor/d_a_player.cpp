@@ -14,6 +14,9 @@
 #include "d/actor/d_a_boomerang.h"
 #include "d/actor/d_a_midna.h"
 #include "d/actor/d_a_spinner.h"
+#if TARGET_PC
+#include "dusk/stereo.h"
+#endif
 
 bool daPy_frameCtrl_c::checkAnmEnd() {
     if (getEndFlg() != 0 && getNowSetFlg() == 0) {
@@ -411,7 +414,22 @@ void daPy_sightPacket_c::draw() {
                  (GXTexWrapMode)mpImg->wrapS, (GXTexWrapMode)mpImg->wrapT, mpImg->mipmapCount > 1 ? GX_ENABLE : GX_DISABLE);
     GXInitTexObjLOD(&texObj, GX_LINEAR, GX_LINEAR, 0.0, 0.0, 0.0, GX_FALSE, GX_FALSE, GX_ANISO_1);
     GXLoadTexObj(&texObj, GX_TEXMAP0);
+#if TARGET_PC
+    // mProjMtx was built in setSight() using the unshifted center projection
+    // (setSight runs from the player draw in fpcDw_Handler, BEFORE the per-eye
+    // painter loop in cAPIGph_Painter). Add the per-eye parallax for mPos's
+    // world depth so the reticle plants on the aimed surface instead of
+    // floating at screen depth. Also re-add hud_ortho_shift_x() to cancel
+    // the J2D ortho's HUD-depth shift that would otherwise drag the reticle
+    // off-target.
+    Mtx adjustedProjMtx;
+    mDoMtx_copy(mProjMtx, adjustedProjMtx);
+    adjustedProjMtx[0][3] += dusk::stereo::screen_parallax_x_for_world_pos(mPos);
+    adjustedProjMtx[0][3] += dusk::stereo::hud_ortho_shift_x();
+    GXLoadPosMtxImm(adjustedProjMtx, GX_PNMTX0);
+#else
     GXLoadPosMtxImm(mProjMtx, GX_PNMTX0);
+#endif
     GXSetCurrentMtx(0);
     GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
     GXCallDisplayList(l_sightDL, 0x80);
@@ -420,6 +438,10 @@ void daPy_sightPacket_c::draw() {
 
 void daPy_sightPacket_c::setSight() {
     Vec proj;
+    // proj.x/y come from the unshifted center projection because setSight runs
+    // from the player's actor draw, which fires in fpcDw_Handler BEFORE the
+    // per-eye painter loop. The per-eye depth correction + HUD-shift counter
+    // is applied later inside draw() (which IS per-eye via the 2D-XLU drain).
     mDoLib_project(&mPos, &proj);
     mDoMtx_stack_c::transS(proj.x, proj.y, proj.z);
     mDoMtx_stack_c::scaleM(32.0f, 32.0f, 32.0f);

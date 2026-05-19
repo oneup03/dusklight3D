@@ -13,6 +13,9 @@
 #include "d/actor/d_a_mirror.h"
 #include "Z2AudioLib/Z2Instances.h"
 #include "SSystem/SComponent/c_math.h"
+#if TARGET_PC
+#include "dusk/stereo.h"
+#endif
 
 int daBoomerang_sight_c::createHeap() {
     void* tmpData;
@@ -388,7 +391,23 @@ void daBoomerang_sight_c::draw() {
 
             screen->animation();
             cursorAll_pane->scale(0.6f, 0.6f);
-            cursorAll_pane->translate(m_proj_posX[i], m_proj_posY[i]);
+#if TARGET_PC
+            // m_proj_posX/Y were computed by setSight via the *unshifted*
+            // center projection (actor draws run in fpcDw_Handler, BEFORE the
+            // per-eye painter loop in cAPIGph_Painter). To give each cursor
+            // the depth of its actual locked target, add a per-eye parallax
+            // shift derived from m_pos[i]'s view-space Z.
+            //
+            // Also re-add hud_ortho_shift_x() to cancel the HUD-depth shift
+            // that mDoGph_Painter applies to the J2D ortho bounds (intended
+            // for flat HUD elements, not world-anchored cursors).
+            const f32 parallax = dusk::stereo::screen_parallax_x_for_world_pos(m_pos[i]);
+            const f32 hudShift = dusk::stereo::hud_ortho_shift_x();
+#else
+            constexpr f32 parallax = 0.0f;
+            constexpr f32 hudShift = 0.0f;
+#endif
+            cursorAll_pane->translate(m_proj_posX[i] + parallax + hudShift, m_proj_posY[i]);
             field_0x98[i] = field_0x98[i];
 
             if (!(field_0x98[i] < 15.0f)) {
@@ -435,7 +454,17 @@ static int daBoomeang_windModelCallBack(J3DJoint* i_joint, int param_1) {
 }
 
 int daBoomerang_c::draw() {
-    if (!checkStateFlg0(FLG0_4)) {
+    // Refresh cursor projections every frame regardless of FLG0_4 (in-flight)
+    // or the event-running gate. setSight caches m_proj_posX/Y from the
+    // current eye-shifted camera matrices; if we skip it while in a close-up
+    // (low eye separation), the cursors stay frozen at that shallow depth
+    // even after the close-up ends. Only the 2D dispatch below stays gated.
+#if TARGET_PC
+    constexpr bool kAlwaysProjectCursors = true;
+#else
+    constexpr bool kAlwaysProjectCursors = false;
+#endif
+    if (kAlwaysProjectCursors || !checkStateFlg0(FLG0_4)) {
         for (int i = 0; i < BOOMERANG_LOCK_MAX; i++) {
             if (m_sight.getAlpha(i) != 0) {
                 if (m_lockActors[i] != NULL) {
@@ -467,10 +496,9 @@ int daBoomerang_c::draw() {
                 m_sight.setSight(NULL, 5);
             }
         }
-
-        if (!dComIfGp_event_runCheck()) {
-            dComIfGd_set2DXlu(&m_sight);
-        }
+    }
+    if (!checkStateFlg0(FLG0_4) && !dComIfGp_event_runCheck()) {
+        dComIfGd_set2DXlu(&m_sight);
     }
 
     g_env_light.settingTevStruct(0, &current.pos, &tevStr);

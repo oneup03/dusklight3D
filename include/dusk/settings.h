@@ -176,6 +176,9 @@ struct UserSettings {
         ConfigVar<float> stereoEyeSeparation;
         ConfigVar<float> stereoConvergence;
         ConfigVar<float> stereoHudDepth;
+        ConfigVar<float> stereoFpSeparationScale;
+        ConfigVar<bool>  enableAutoConvergence;
+        ConfigVar<float> autoConvergenceSmoothing;
 
         // Audio
         ConfigVar<bool> noLowHpSound;

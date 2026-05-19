@@ -2251,7 +2251,19 @@ BOOL daAlink_sight_c::create() {
 
 void daAlink_sight_c::draw() {
     if (mLockFlag) {
+#if TARGET_PC
+        // mProjMtx was built in setSight() (parent class) using the unshifted
+        // center projection -- setSight runs from the player draw in
+        // fpcDw_Handler, BEFORE the per-eye painter loop. Add per-eye parallax
+        // for mPos's world depth so the lock cursor plants on the locked
+        // target (e.g. dominion-rod statue) instead of floating at screen
+        // depth, and cancel the J2D ortho's HUD-depth shift.
+        const f32 parallax = dusk::stereo::screen_parallax_x_for_world_pos(mPos);
+        const f32 hudShift = dusk::stereo::hud_ortho_shift_x();
+        mLockCursor.setPos(mProjMtx[0][3] + parallax + hudShift, mProjMtx[1][3]);
+#else
         mLockCursor.setPos(mProjMtx[0][3], mProjMtx[1][3]);
+#endif
         mLockCursor.draw();
     } else {
         daPy_sightPacket_c::draw();

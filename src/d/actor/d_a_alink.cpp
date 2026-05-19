@@ -55,6 +55,7 @@
 #include "dusk/action_bindings.h"
 #include "dusk/frame_interpolation.h"
 #include "dusk/settings.h"
+#include "dusk/stereo.h"
 #include "res/Object/Alink.h"
 #include <cstring>
 #endif
@@ -19458,7 +19459,9 @@ int daAlink_c::draw() {
     initTevCustomColor();
 
     if (mSight.getDrawFlg() && !checkEventRun()) {
-        #if PLATFORM_GCN
+        #if PLATFORM_GCN || TARGET_PC
+        // PC: needed so the bow/slingshot/clawshot reticle actually renders
+        // (and so the stereo per-eye parallax in setSight can take effect).
         mSight.setSight();
         #endif
     }

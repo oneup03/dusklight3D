@@ -21,7 +21,6 @@ void apply_config_from_settings();
 void push_eye_offset(AuroraEye eye);
 void pop_eye_offset();
 
-
 // Depth-aware per-particle correction for any screen-space-projection
 // texgen built like `mtx = LightPerspective * camera_space_srt` and
 // sampled at billboard corners (the JPA refraction pattern in

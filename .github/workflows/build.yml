@@ -48,6 +48,7 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+          token: ${{ secrets.SUBMODULE_PAT }}
 
       - name: Install dependencies
         run: |
@@ -111,6 +112,7 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+          token: ${{ secrets.SUBMODULE_PAT }}
 
       - name: Install dependencies
         run: brew install cmake ninja
@@ -173,6 +175,7 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+          token: ${{ secrets.SUBMODULE_PAT }}
 
       - name: Install dependencies
         run: |
@@ -259,6 +262,7 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+          token: ${{ secrets.SUBMODULE_PAT }}
 
       - name: Enable Visual Studio environment
         uses: ilammy/msvc-dev-cmd@v1

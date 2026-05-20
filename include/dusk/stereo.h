@@ -76,6 +76,14 @@ f32 hud_ortho_shift_x();
 // closer than convergence pop forward, farther points recede.
 f32 screen_parallax_x_for_world_pos(const cXyz& world_pos);
 
+// Step the smoothed close-up separation scale once per simulation frame.
+// Snaps down to the target instantly when the close-up predicate fires
+// (FP aim, dialog, item-get, etc.) so comfort applies the same frame, and
+// eases exponentially back to 1.0 when the predicate releases so the world
+// doesn't pop wider the instant the trigger ends. Call once per frame
+// alongside auto_convergence_tick() before the eye loop.
+void closeup_scale_tick();
+
 // Adjust the active convergence each simulation frame based on what the
 // player is looking at. Priority chain:
 //   1. Z-target lock-on actor distance

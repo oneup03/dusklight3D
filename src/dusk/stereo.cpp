@@ -3,6 +3,7 @@
 #include "dusk/settings.h"
 
 #include "d/d_com_inf_game.h"
+#include "d/d_msg_object.h"
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_player.h"
 #include "f_op/f_op_camera_mng.h"
@@ -39,24 +40,58 @@ SavedCameraState s_saved[kMaxCameras]{};
 // refraction_skew_correction_x.
 AuroraEye s_current_eye = AURORA_EYE_LEFT;
 
+// Null-safe wrapper for dMsgObject_isTalkNowCheck(). The inline ultimately
+// derefs dMsgObject_c::mpRenProc, which is NULL between scenes (set by
+// _delete before dComIfGp_setMsgObjectClass(NULL)) and during the brief
+// window inside dMsgObject_Create between setMsgObjectClass(obj) and
+// obj->_create() that allocates mpRenProc. Production call sites (timer /
+// meter / NPC actors) only run after the msg object is fully constructed,
+// but stereo queries run from the camera/draw paths which are alive on
+// title-screen and scene-transition frames where mMsgObjectClass is NULL.
+bool is_text_box_active() {
+    if (dComIfGp_getMsgObjectClass() == nullptr) {
+        return false;
+    }
+    return dMsgObject_isTalkNowCheck();
+}
+
 // Current smoothed auto-convergence value (world units). Initialized to the
 // user's slider default; auto_convergence_tick() updates it each sim frame
 // when enabled. Never written back to user settings.
 f32 s_auto_convergence = 300.0f;
 
+// Smoothed close-up separation scale (0..1). closeup_scale_tick() snaps this
+// down instantly when the close-up predicate becomes true (so comfort kicks
+// in immediately when you draw a bow or open a textbox) and eases it back
+// up toward 1.0 with an exponential roll-off when the predicate releases
+// (so the world doesn't pop "wider" the instant you stow the weapon or
+// close the dialog). Read by effective_separation_scale().
+f32 s_smoothed_closeup_scale = 1.0f;
+
+// Exit roll-off time constant. ~1.5s gives a slow, unhurried expansion so
+// the world doesn't pop wider the instant a textbox closes or a weapon is
+// stowed. Combined with the per-frame dt (~1/60s) via kAssumedDt below.
+constexpr f32 kCloseupExitTimeConstSec = 1.5f;
+constexpr f32 kAssumedFrameDt = 1.0f / 60.0f;
+
 AuroraStereoMode current_mode() {
     return static_cast<AuroraStereoMode>(static_cast<int>(getSettings().game.stereoMode.getValue()));
 }
 
+bool should_reduce_separation_for_closeups();
+f32 effective_separation_scale();
+
 // Returns whichever convergence the rest of the pipeline should use this
 // frame: the auto-converged value when the toggle is on, otherwise the user
-// slider value. Centralized so push_eye_offset and refraction_skew_correction_x
-// agree.
+// slider value. The close-up scale is applied to both branches so the comfort
+// plane pulls in toward the camera during FP aim / dialog / item-get, keeping
+// the close subject closer to zero parallax. Centralized so push_eye_offset
+// and refraction_skew_correction_x agree.
 f32 effective_convergence() {
-    if (getSettings().game.enableAutoConvergence.getValue()) {
-        return s_auto_convergence;
-    }
-    return getSettings().game.stereoConvergence.getValue();
+    const f32 base = getSettings().game.enableAutoConvergence.getValue()
+        ? s_auto_convergence
+        : getSettings().game.stereoConvergence.getValue();
+    return base * effective_separation_scale();
 }
 
 // True when something close to the camera dominates the frame and full
@@ -73,16 +108,21 @@ bool should_reduce_separation_for_closeups() {
     // Predicates kept narrow + safe (avoiding the msg-object internals that
     // deref nullable jmessage_tReference / jmessage_tRenderingProcessor
     // pointers between messages):
-    //  - getMesgStatus: standard NPC text box (already-rendering).
+    //  - dMsgObject_isTalkNowCheck: the universal "any text box is currently
+    //    showing" check (msg-object status != 1 = idle). Catches NPC dialog,
+    //    Midna whispers, narrator strings like the "it's a monster!" reaction
+    //    when wolf Link enters town -- none of which set mItemInfo.mMesgStatus,
+    //    so dComIfGp_getMesgStatus() returns 0 for them (the field is never
+    //    written anywhere in the codebase).
     //  - isPauseFlag: pause menu / inventory / map / collection.
     //  - mSight.getDrawFlg + checkBowAnime: any aim mode (FP bow/slingshot/
     //    clawshot/dominion rod, plus third-person boomerang/whistle target-
     //    lock). User wants ALL of these to use the close-up scale.
     //  - Talk / item-get / treasure procs catch the *full* close-up sequences
     //    -- the item-get animation runs for ~2s before the text box appears,
-    //    and Midna-by-Z runs through PROC_TALK before getMesgStatus fires.
+    //    and Midna-by-Z runs through PROC_TALK before the message screen does.
     //    Using the proc enum gets the whole arc, not just the text-box.
-    if (dComIfGp_getMesgStatus() != 0 || dComIfGp_isPauseFlag()) {
+    if (is_text_box_active() || dComIfGp_isPauseFlag()) {
         return true;
     }
     daPy_py_c* player = dComIfGp_getLinkPlayer();
@@ -101,6 +141,19 @@ bool should_reduce_separation_for_closeups() {
     case daAlink_c::PROC_GET_ITEM:             // bug / heart piece / etc pickup
     case daAlink_c::PROC_LOOK_UP_TO_GET_ITEM:  // sky-held item pickup
     case daAlink_c::PROC_OPEN_TREASURE:        // chest opening
+    // Horse-call leaf: picking it up (one-shot anim) and sustained blow
+    // (held-button loop) both zoom on Link's hands/face.
+    case daAlink_c::PROC_GRASS_WHISTLE_GET:
+    case daAlink_c::PROC_GRASS_WHISTLE_WAIT:
+    // Wolf howling: free howl (target / enemy alert) and Howling Stone
+    // scripted demo (note-matching minigame) both frame on Link's head.
+    case daAlink_c::PROC_WOLF_HOWL:
+    case daAlink_c::PROC_WOLF_HOWL_DEMO:
+    // Wolf scripted-event waiting state: the closest wolf analogue to
+    // PROC_TALK. Active during the camera lead-in for wolf-form scripted
+    // scenes (town-entry intros, Midna-by-Z, owl chats) BEFORE the text
+    // box opens, so getMesgStatus() doesn't catch it yet.
+    case daAlink_c::PROC_WOLF_SERVICE_WAIT:
     // FP clawshot/hookshot stays in SUBJECT throughout the aim + chain-
     // extension phases. mSight is on during aim (caught above) but flips
     // off when the chain is firing; PROC_HOOKSHOT_SUBJECT keeps closeup
@@ -114,11 +167,15 @@ bool should_reduce_separation_for_closeups() {
     }
 }
 
-f32 effective_separation_scale() {
+f32 closeup_scale_target() {
     if (should_reduce_separation_for_closeups()) {
         return getSettings().game.stereoFpSeparationScale.getValue();
     }
     return 1.0f;
+}
+
+f32 effective_separation_scale() {
+    return s_smoothed_closeup_scale;
 }
 
 } // namespace
@@ -315,6 +372,19 @@ f32 screen_parallax_x_for_world_pos(const cXyz& world_pos) {
     return delta_ndc * viewport_width * 0.5f;
 }
 
+void closeup_scale_tick() {
+    const f32 target = closeup_scale_target();
+    if (target <= s_smoothed_closeup_scale) {
+        // Entering / tightening close-up: snap so comfort applies the same
+        // frame the trigger fires.
+        s_smoothed_closeup_scale = target;
+    } else {
+        // Releasing close-up: exponential ease back to full separation.
+        const f32 alpha = std::clamp(kAssumedFrameDt / kCloseupExitTimeConstSec, 0.0f, 1.0f);
+        s_smoothed_closeup_scale += alpha * (target - s_smoothed_closeup_scale);
+    }
+}
+
 namespace {
 
 f32 distance_to(const cXyz& a, const cXyz& b) {
@@ -364,8 +434,11 @@ void auto_convergence_tick() {
 
     // Dialog open: freeze the comfort plane so it doesn't jump when the text
     // box appears. We do NOT republish here -- whatever apply_config did last
-    // frame stays in effect.
-    if (dComIfGp_getMesgStatus() != 0) {
+    // frame stays in effect. dMsgObject_isTalkNowCheck is the universal "text
+    // is on screen" check; mItemInfo.mMesgStatus is item-flow-only (in fact
+    // never written anywhere in the codebase) and misses NPC / wolf-reaction
+    // / narrator dialogs.
+    if (is_text_box_active()) {
         return;
     }
 

@@ -945,6 +945,20 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .valueMax = 35,
                 .defaultValue = 10,
             }, mPrelaunch);
+        graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.stereoRefractionScale,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoRefractionScale,
+                .title = "Refraction Strength",
+                .helpText = "Scales the amplitude of particle refraction (heat haze, fire shimmer,"
+                            " water distortion) when 3D is active. Screen-space refraction can"
+                            " cause eye strain in stereo because the haze appears at one depth but"
+                            " shows pixels from varying depths behind it. Lower values soften the"
+                            " effect; 0% removes it entirely. Mono rendering is not affected."
+                            " Default 30%.",
+                .valueMin = 0,
+                .valueMax = 100,
+                .defaultValue = 30,
+            }, mPrelaunch);
         config_bool_select(leftPane, rightPane, getSettings().game.enableAutoConvergence,
             {
                 .key = "Auto-Convergence",

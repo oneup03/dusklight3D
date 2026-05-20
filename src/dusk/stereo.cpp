@@ -157,6 +157,8 @@ void apply_config_from_settings() {
         .eyeSeparation = getSettings().game.stereoEyeSeparation.getValue(),
         .convergence = effective_convergence(),
         .hudDepth = hudDepthUv,
+        .refractionAmplitudeScale = std::clamp(
+            getSettings().game.stereoRefractionScale.getValue(), 0.0f, 1.0f),
     };
     aurora_set_stereo_config(&cfg);
 }

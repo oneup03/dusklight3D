@@ -177,6 +177,7 @@ struct UserSettings {
         ConfigVar<float> stereoConvergence;
         ConfigVar<float> stereoHudDepth;
         ConfigVar<float> stereoFpSeparationScale;
+        ConfigVar<float> stereoRefractionScale;
         ConfigVar<bool>  enableAutoConvergence;
         ConfigVar<float> autoConvergenceSmoothing;
 

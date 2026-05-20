@@ -104,6 +104,12 @@ void set_value(GraphicsOption option, int value) {
             static_cast<float>(std::clamp(value, 1, 35)) * 0.01f);
         stereo::apply_config_from_settings();
         break;
+    case GraphicsOption::StereoRefractionScale:
+        // Slider value 0..100 -> stored scale 0.0..1.0 (each step = 1%).
+        getSettings().game.stereoRefractionScale.setValue(
+            static_cast<float>(std::clamp(value, 0, 100)) * 0.01f);
+        stereo::apply_config_from_settings();
+        break;
     }
     config::Save();
 }
@@ -232,6 +238,11 @@ int get_graphics_setting_value(GraphicsOption option) {
         return std::clamp(
             static_cast<int>(std::round(getSettings().game.stereoFpSeparationScale.getValue() * 100.0f)),
             1, 35);
+    case GraphicsOption::StereoRefractionScale:
+        // 0.0..1.0 stored -> slider value 0..100
+        return std::clamp(
+            static_cast<int>(std::round(getSettings().game.stereoRefractionScale.getValue() * 100.0f)),
+            0, 100);
     }
     return 0;
 }
@@ -299,6 +310,8 @@ Rml::String format_graphics_setting_value(GraphicsOption option, int value) {
     case GraphicsOption::StereoHudDepth:
         return fmt::format("{:+d} units", value);
     case GraphicsOption::StereoFpSeparationScale:
+        return fmt::format("{}%", value);
+    case GraphicsOption::StereoRefractionScale:
         return fmt::format("{}%", value);
     }
     return "";

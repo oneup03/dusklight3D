@@ -667,6 +667,7 @@ if (WIN32 AND LEIASR_SDKROOT AND MSVC)
         /DELAYLOAD:SimulatedRealityHandTrackers.dll
         /DELAYLOAD:SimulatedRealityUserModelers.dll
         /DELAYLOAD:DimencoWeaving.dll
+        /DELAYLOAD:opencv_world343.dll
     )
     target_link_libraries(dusklight PRIVATE delayimp.lib)
 endif ()

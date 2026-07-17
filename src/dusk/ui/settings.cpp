@@ -1,4 +1,4 @@
-#include "settings.hpp"
+﻿#include "settings.hpp"
 
 #include "aurora/gfx.h"
 #include "bool_button.hpp"
@@ -888,7 +888,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .valueMin = static_cast<int>(StereoMode::Off),
                 .valueMax = static_cast<int>(StereoMode::LeiaSR),
                 .defaultValue = static_cast<int>(StereoMode::Off),
-            }, mPrelaunch);
+            });
         graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.stereoEyeSeparation,
             GraphicsTunerProps{
                 .option = GraphicsOption::StereoEyeSeparation,
@@ -899,7 +899,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .valueMin = 0,
                 .valueMax = 100,
                 .defaultValue = 30,
-            }, mPrelaunch);
+            });
         graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.stereoConvergence,
             GraphicsTunerProps{
                 .option = GraphicsOption::StereoConvergence,
@@ -910,7 +910,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .valueMin = 1,
                 .valueMax = 60,
                 .defaultValue = 12, // 12 * 25 = 300 world units, ~3m
-            }, mPrelaunch);
+            });
         graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.stereoHudDepth,
             GraphicsTunerProps{
                 .option = GraphicsOption::StereoHudDepth,
@@ -921,7 +921,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .valueMin = -30,
                 .valueMax = 30,
                 .defaultValue = -10,
-            }, mPrelaunch);
+            });
         graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.stereoFpSeparationScale,
             GraphicsTunerProps{
                 .option = GraphicsOption::StereoFpSeparationScale,
@@ -933,7 +933,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .valueMin = 1,
                 .valueMax = 35,
                 .defaultValue = 10,
-            }, mPrelaunch);
+            });
         graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.stereoRefractionScale,
             GraphicsTunerProps{
                 .option = GraphicsOption::StereoRefractionScale,
@@ -947,7 +947,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .valueMin = 0,
                 .valueMax = 100,
                 .defaultValue = 30,
-            }, mPrelaunch);
+            });
         config_bool_select(leftPane, rightPane, getSettings().game.enableAutoConvergence,
             {
                 .key = "Auto-Convergence",
@@ -1247,7 +1247,7 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                     },
                 .min = 1,
                 .max = 8,
-                .suffix = "×",
+                .suffix = "Ã—",
             }),
             rightPane, [](Pane& pane) {
                 pane.clear();
@@ -1503,9 +1503,9 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
         leftPane.register_control(crashReporting, rightPane, [](Pane& pane) {
             pane.clear();
             pane.add_rml("Dusklight can automatically send crash reports to the developers. Crash "
-                         "reports contain the following:<br/>• Operating system version<br/>• CPU "
-                         "architecture<br/>• GPU model & driver version<br/>• File paths (may "
-                         "include account username)<br/>• Stack trace");
+                         "reports contain the following:<br/>â€¢ Operating system version<br/>â€¢ CPU "
+                         "architecture<br/>â€¢ GPU model & driver version<br/>â€¢ File paths (may "
+                         "include account username)<br/>â€¢ Stack trace");
         });
 #endif
         config_bool_select(leftPane, rightPane, getSettings().backend.skipPreLaunchUI,

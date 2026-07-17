@@ -184,8 +184,6 @@ bool is_close_up_focus_active() {
     return should_reduce_separation_for_closeups();
 }
 
-namespace {
-
 f32 current_eye_offset_x() {
     if (current_mode() == AURORA_STEREO_OFF) {
         return 0.0f;
@@ -198,7 +196,24 @@ f32 current_eye_offset_x() {
     return sign * (separation * 0.5f);
 }
 
-} // namespace
+f32 current_projection_shear_x() {
+    const f32 eyeOffsetX = current_eye_offset_x();
+    if (eyeOffsetX == 0.0f) {
+        return 0.0f;
+    }
+    const f32 convergence = effective_convergence();
+    if (convergence <= 0.0001f) {
+        return 0.0f;
+    }
+    const camera_process_class* camera = dComIfGp_getCamera(0);
+    if (camera == nullptr) {
+        return 0.0f;
+    }
+    // Must match push_eye_offset's projShift term exactly: projMtx[0][0] is
+    // untouched by the eye push, so reading it live between push/pop yields
+    // the same value push_eye_offset used.
+    return -eyeOffsetX * camera->view.projMtx[0][0] / convergence;
+}
 
 bool active() {
     return current_mode() != AURORA_STEREO_OFF;

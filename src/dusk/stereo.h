@@ -21,6 +21,24 @@ void apply_config_from_settings();
 void push_eye_offset(AuroraEye eye);
 void pop_eye_offset();
 
+// Signed per-eye half-separation in view-space X: -sep/2 for LEFT,
+// +sep/2 for RIGHT, 0 in mono. Includes the close-up reduction scale.
+// Public so per-actor stereo correction code (e.g. d_a_obj_mhole) can
+// compute its own geometry-correct matrix shifts.
+f32 current_eye_offset_x();
+
+// The horizontal shear push_eye_offset applied to the camera projection for
+// the current eye (the exact delta it added to projMtx[0][2]); 0 in mono or
+// with degenerate convergence. Screen-space ViewProjmap texgens (the magnet
+// field's LightPerspective effect matrix and friends) must add the SAME
+// shear to THEIR projection's [0][2], or their scene-capture sampling
+// decouples from the per-eye render projection by a constant screen-space
+// offset (the "surface floats off the magnet" artifact). The eye TRANSLATION
+// needs no texgen-side correction: it already enters the texcoord chain
+// through GX_PNMTX0 (view * model), which J3D ConcatView shapes load per eye
+// at shape-draw time.
+f32 current_projection_shear_x();
+
 // Depth-aware per-particle correction for any screen-space-projection
 // texgen built like `mtx = LightPerspective * camera_space_srt` and
 // sampled at billboard corners (the JPA refraction pattern in

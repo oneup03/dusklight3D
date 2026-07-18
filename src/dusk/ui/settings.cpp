@@ -948,10 +948,6 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .valueMax = 100,
                 .defaultValue = 30,
             });
-        config_bool_select(leftPane, rightPane, getSettings().game.enableAutoConvergence,
-            {
-                .key = "Auto-Convergence",
-            });
     });
 
     add_tab("Input", [this](Rml::Element* content) {

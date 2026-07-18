@@ -11,6 +11,18 @@ namespace dusk::stereo {
 // True when the user-selected stereo mode is anything other than Off.
 bool active();
 
+// True when this is the "first" (or only) eye of the per-eye render loop
+// this frame -- LEFT in stereo mode, always true in mono. cAPIGph_Painter
+// invokes the shared per-eye draw entry point (mDoGph_Painter, which is
+// where painterMtd/g_imguiConsole's PreDraw/PostDraw live) once per eye when
+// stereo is active. Any once-per-frame logic hosted inside that shared
+// entry point (ImGui debug-menu construction, F-key toggles, etc.) must
+// guard on this, or it runs twice per frame -- ImGui key-press state
+// (IsKeyPressed) only updates once per real frame, so an F-key toggle wired
+// through PreDraw() flips on then immediately back off within the same
+// frame, making the window flash and vanish instead of staying open.
+bool is_first_eye_of_frame();
+
 // Read the current dusk::getSettings() stereo values and push them down to
 // Aurora via aurora_set_stereo_config. Call on startup and after any UI change.
 void apply_config_from_settings();
@@ -99,20 +111,40 @@ f32 screen_parallax_x_for_world_pos(const cXyz& world_pos);
 // (FP aim, dialog, item-get, etc.) so comfort applies the same frame, and
 // eases exponentially back to 1.0 when the predicate releases so the world
 // doesn't pop wider the instant the trigger ends. Call once per frame
-// alongside auto_convergence_tick() before the eye loop.
+// alongside fov_scale_tick() before the eye loop.
 void closeup_scale_tick();
 
-// Adjust the active convergence each simulation frame based on what the
-// player is looking at. Priority chain:
-//   1. Z-target lock-on actor distance
-//   2. Aim mode (bow/slingshot/clawshot) sight hit-point distance
-//   3. Cutscene/event camera lookat distance
-//   4. Dialog open -> freeze (skip update, avoids text-box jumps)
-//   5. Fallback: depth at screen center via GXPeekZ
-// Smoothed with the user's autoConvergenceSmoothing time constant. No-op when
-// enableAutoConvergence is false. Call once per simulation frame BEFORE the
-// painter funnel starts the eye loop.
-void auto_convergence_tick();
+// Step the rate-limited FoV-aware auto-scale once per simulation frame. TP's
+// Fovy swings widely at runtime (hawkeye/telescope zoom, cutscene and
+// dialogue framing from ~30 to ~115 degrees) and none of that flows into
+// separation today, so the stereo depth effect visibly inflates when the
+// camera zooms in and collapses when it zooms out. Reads the live
+// camera->view.fovy, compares it against a fixed reference FoV calibrated
+// to TP's de-facto default gameplay Fovy (60 degrees -- the value the
+// engine itself falls back to more than any other), and rate-limits the
+// tan(fov/2) ratio toward that target (see kFovScaleMaxStepPerSec) rather
+// than exponentially smoothing it -- TP's own camera-style hand-off (e.g.
+// chaseCamera resuming after FP aim/dialog) already blends Fovy back with a
+// genuine linear ramp, and an EMA on top of a ramping input trails it by a
+// constant lag that then has to visibly "catch up" once the ramp stops. A
+// rate limiter tracks that ramp with zero steady-state lag while still
+// spreading a genuine instantaneous FoV cut over a handful of frames.
+// Convergence is a distance and deliberately excluded from this scale (see
+// effective_convergence()) -- only separation needs FoV compensation.
+// Call once per frame alongside closeup_scale_tick() before the eye loop.
+void fov_scale_tick();
+
+// Read-only snapshot of internal smoothing state, for the ImGui camera
+// debug overlay. Not read by any gameplay/render logic -- exists purely so
+// live values (fov_scale, closeup_scale, the combined separation multiplier,
+// convergence) can be watched in real time while diagnosing timing issues.
+struct DebugState {
+    f32 fovScale;        // s_fov_scale (rate-limited, see fov_scale_tick)
+    f32 closeupScale;    // s_smoothed_closeup_scale
+    f32 separationScale; // effective_separation_scale() -- product of closeup * fov scales
+    f32 convergence;     // effective_convergence() -- what push_eye_offset actually uses
+};
+DebugState debug_state();
 
 } // namespace dusk::stereo
 

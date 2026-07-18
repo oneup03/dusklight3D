@@ -84,8 +84,6 @@ UserSettings g_userSettings = {
         .stereoHudDepth {"game.stereoHudDepth", -10.0f},
         .stereoFpSeparationScale {"game.stereoFpSeparationScale", 0.10f},
         .stereoRefractionScale {"game.stereoRefractionScale", 0.30f},
-        .enableAutoConvergence {"game.enableAutoConvergence", false},
-        .autoConvergenceSmoothing {"game.autoConvergenceSmoothing", 0.30f},
         // Audio
         .noLowHpSound {"game.noLowHpSound", false},
         .midnasLamentNonStop {"game.midnasLamentNonStop", false},
@@ -297,8 +295,6 @@ void registerSettings() {
     Register(g_userSettings.game.stereoHudDepth);
     Register(g_userSettings.game.stereoFpSeparationScale);
     Register(g_userSettings.game.stereoRefractionScale);
-    Register(g_userSettings.game.enableAutoConvergence);
-    Register(g_userSettings.game.autoConvergenceSmoothing);
     Register(g_userSettings.game.enableFastIronBoots);
     Register(g_userSettings.game.canTransformAnywhere);
     Register(g_userSettings.game.fastRoll);

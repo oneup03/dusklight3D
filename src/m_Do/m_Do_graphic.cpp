@@ -2207,7 +2207,13 @@ int mDoGph_Painter() {
     }
 
 #if TARGET_PC
-    dusk::g_imguiConsole.PreDraw();
+    // Stereo mode invokes this function once per eye; PreDraw() only builds
+    // the ImGui widget tree (menu bar, F-key debug toggles) and must run
+    // exactly once per real frame or F-key toggles double-flip and the
+    // window never stays open (see dusk::stereo::is_first_eye_of_frame()).
+    if (dusk::stereo::is_first_eye_of_frame()) {
+        dusk::g_imguiConsole.PreDraw();
+    }
 #endif
 
     #if DEBUG
@@ -2898,7 +2904,9 @@ int mDoGph_Painter() {
     #endif
 
 #if TARGET_PC
-    dusk::g_imguiConsole.PostDraw();
+    if (dusk::stereo::is_first_eye_of_frame()) {
+        dusk::g_imguiConsole.PostDraw();
+    }
 #endif
 
     mDoGph_gInf_c::endRender();

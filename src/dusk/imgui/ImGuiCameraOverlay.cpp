@@ -1,12 +1,14 @@
 #include "f_op/f_op_camera_mng.h"
 #include "SSystem/SComponent/c_xyz.h"
 #include "d/d_com_inf_game.h"
+#include "d/actor/d_a_alink.h"
 
 #include "imgui.h"
 #include "ImGuiConfig.hpp"
 #include "ImGuiConsole.hpp"
 #include "ImGuiMenuTools.hpp"
 #include "dusk/settings.h"
+#include "dusk/stereo.h"
 
 namespace dusk {
     void ImGuiMenuTools::ShowCameraOverlay() {
@@ -87,6 +89,23 @@ namespace dusk {
         }
         if (!getSettings().game.debugFlyCam) {
             ImGui::EndDisabled();
+        }
+
+        if (dusk::stereo::active()) {
+            ImGui::SeparatorText("Stereo 3D Debug");
+            const auto dbg = dusk::stereo::debug_state();
+            ImGui::Text("Fovy (raw): %.2f deg", cam->view.fovy);
+            ImGui::Text("FoV scale: %.3f", dbg.fovScale);
+            ImGui::Text("Closeup scale: %.3f", dbg.closeupScale);
+            ImGui::Text("Separation scale (combined): %.3f", dbg.separationScale);
+            ImGui::Text("Convergence (effective): %.1f", dbg.convergence);
+            ImGui::Text("Close-up focus active: %s", dusk::stereo::is_close_up_focus_active() ? "TRUE" : "false");
+            if (auto* player = dComIfGp_getLinkPlayer()) {
+                auto* alink = static_cast<daAlink_c*>(player);
+                ImGui::Text("Link ProcID: 0x%X", static_cast<unsigned>(alink->mProcID));
+                ImGui::Text("mSight draw flag: %s", alink->mSight.getDrawFlg() ? "TRUE" : "false");
+                ImGui::Text("checkBowAnime: %s", alink->checkBowAnime() ? "TRUE" : "false");
+            }
         }
 
         ShowCornerContextMenu(m_cameraOverlayCorner, 0);

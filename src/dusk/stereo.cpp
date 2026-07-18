@@ -7,12 +7,9 @@
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_player.h"
 #include "f_op/f_op_camera_mng.h"
-#include "f_op/f_op_actor_mng.h"
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_mtx.h"
 #include "mtx.h"
-
-#include <dolphin/gx/GXCpu2Efb.h>
 
 #include <algorithm>
 #include <cmath>
@@ -55,11 +52,6 @@ bool is_text_box_active() {
     return dMsgObject_isTalkNowCheck();
 }
 
-// Current smoothed auto-convergence value (world units). Initialized to the
-// user's slider default; auto_convergence_tick() updates it each sim frame
-// when enabled. Never written back to user settings.
-f32 s_auto_convergence = 300.0f;
-
 // Smoothed close-up separation scale (0..1). closeup_scale_tick() snaps this
 // down instantly when the close-up predicate becomes true (so comfort kicks
 // in immediately when you draw a bow or open a textbox) and eases it back
@@ -70,9 +62,42 @@ f32 s_smoothed_closeup_scale = 1.0f;
 
 // Exit roll-off time constant. ~1.5s gives a slow, unhurried expansion so
 // the world doesn't pop wider the instant a textbox closes or a weapon is
-// stowed. Combined with the per-frame dt (~1/60s) via kAssumedDt below.
+// stowed. Combined with the per-frame dt (~1/60s) via kAssumedFrameDt below.
 constexpr f32 kCloseupExitTimeConstSec = 1.5f;
 constexpr f32 kAssumedFrameDt = 1.0f / 60.0f;
+
+// TP's de-facto default gameplay Fovy in degrees. Not a named engine
+// constant -- FoV is set per camera-style/per-scene throughout d_camera.cpp
+// -- but 60 is by far the most common fallback (initial camera state, most
+// dialogue/idle camera resets, most event-camera defaults), making it the
+// most defensible calibration anchor for "the FoV the separation/convergence
+// sliders were tuned while looking at."
+constexpr f32 kReferenceFovDeg = 60.0f;
+
+// Max fov_scale change per second, applied as a rate limiter rather than an
+// exponential EMA. TP's own camera-style hand-off (chaseCamera re-entering
+// after FP aim / dialog releases, see d_camera.cpp) already blends Fovy back
+// with a genuine LINEAR ramp over a dynamically-computed duration -- an EMA
+// on top of that ramping input trails it by a constant lag the whole time,
+// and once the ramp stops the EMA still has to close that residual lag,
+// producing a small extra "catch-up" pop that lands AFTER the camera has
+// already finished moving (independently of, but confusingly close in time
+// to, any unrelated close-up separation ease still running). A rate limiter
+// tracks a ramp with ZERO steady-state lag as long as the ramp's own speed
+// stays under this cap, while still spreading a genuine instantaneous FoV
+// cut (e.g. a dialogue layout hard-setting Fovy) over a handful of frames
+// instead of a single-frame pop. ~7/s closes a full-range hop (widest zoom
+// to widest cutscene FoV, roughly 2.5x in scale) in about a third of a
+// second.
+constexpr f32 kFovScaleMaxStepPerSec = 7.0f;
+
+constexpr f32 kDegToRad = 0.017453292519943295f;
+
+// Rate-limited FoV-aware separation scale (see kFovScaleMaxStepPerSec for
+// why this is a rate limiter and not an EMA). 1.0 at the reference FoV;
+// shrinks as the camera zooms in (narrower Fovy) to keep rendered disparity
+// constant. Never written back to user settings. See fov_scale_tick().
+f32 s_fov_scale = 1.0f;
 
 AuroraStereoMode current_mode() {
     return static_cast<AuroraStereoMode>(static_cast<int>(getSettings().game.stereoMode.getValue()));
@@ -81,17 +106,34 @@ AuroraStereoMode current_mode() {
 bool should_reduce_separation_for_closeups();
 f32 effective_separation_scale();
 
-// Returns whichever convergence the rest of the pipeline should use this
-// frame: the auto-converged value when the toggle is on, otherwise the user
-// slider value. The close-up scale is applied to both branches so the comfort
-// plane pulls in toward the camera during FP aim / dialog / item-get, keeping
-// the close subject closer to zero parallax. Centralized so push_eye_offset
-// and refraction_skew_correction_x agree.
+// The convergence the rest of the pipeline should use this frame: the user's
+// manual slider value, scaled only by the close-up scale (NOT the FoV scale --
+// convergence is a distance, not a disparity, so it doesn't need FoV
+// compensation). The close-up scale IS applied because during FP aim / dialog
+// / item-get the near subject is close enough that pulling the comfort plane
+// in with it (not just shrinking separation) reads better. Centralized so
+// push_eye_offset and refraction_skew_correction_x agree.
 f32 effective_convergence() {
-    const f32 base = getSettings().game.enableAutoConvergence.getValue()
-        ? s_auto_convergence
-        : getSettings().game.stereoConvergence.getValue();
-    return base * effective_separation_scale();
+    return getSettings().game.stereoConvergence.getValue() * s_smoothed_closeup_scale;
+}
+
+f32 tan_half_fov(f32 fovyDeg) {
+    return std::tan(fovyDeg * kDegToRad * 0.5f);
+}
+
+// dynamic3d-style FoV compensation: disparity scales with sep * P00, and
+// P00 = cot(fovy/2)/aspect, so a narrower FoV inflates disparity unless
+// separation is scaled down by tan(halfGame)/tan(halfRef) to cancel it.
+f32 compute_fov_scale(f32 fovyDeg) {
+    if (fovyDeg <= 0.0f || fovyDeg >= 180.0f) {
+        return 1.0f;
+    }
+    const f32 tanHalfGame = tan_half_fov(fovyDeg);
+    const f32 tanHalfRef = tan_half_fov(kReferenceFovDeg);
+    if (tanHalfGame <= 0.0f || tanHalfRef <= 0.0f) {
+        return 1.0f;
+    }
+    return tanHalfGame / tanHalfRef;
 }
 
 // True when something close to the camera dominates the frame and full
@@ -149,11 +191,17 @@ bool should_reduce_separation_for_closeups() {
     // scripted demo (note-matching minigame) both frame on Link's head.
     case daAlink_c::PROC_WOLF_HOWL:
     case daAlink_c::PROC_WOLF_HOWL_DEMO:
-    // Wolf scripted-event waiting state: the closest wolf analogue to
-    // PROC_TALK. Active during the camera lead-in for wolf-form scripted
-    // scenes (town-entry intros, Midna-by-Z, owl chats) BEFORE the text
-    // box opens, so getMesgStatus() doesn't catch it yet.
-    case daAlink_c::PROC_WOLF_SERVICE_WAIT:
+    // NOTE: PROC_WOLF_SERVICE_WAIT (0xEE) was previously listed here on the
+    // belief it was a "wolf analogue to PROC_TALK" for scripted-scene camera
+    // lead-ins. That was wrong: its only real entry point (procWolfWait's
+    // idle countdown, d_a_alink_wolf.inc) is wolf's ORDINARY stand-still
+    // idle state -- the timer is quartered for wolf, so it fires after only
+    // ~3s of no input. Including it here collapsed the stereo depth every
+    // time you idled as wolf (user-reported "3D snaps ~3s after I stop
+    // moving"). The genuine wolf scripted scenes it was meant to catch run
+    // through PROC_TALK (already handled) or open a text box (caught by
+    // is_text_box_active()), so dropping this case loses no real close-up
+    // framing. Do NOT re-add it.
     // FP clawshot/hookshot stays in SUBJECT throughout the aim + chain-
     // extension phases. mSight is on during aim (caught above) but flips
     // off when the chain is firing; PROC_HOOKSHOT_SUBJECT keeps closeup
@@ -175,7 +223,7 @@ f32 closeup_scale_target() {
 }
 
 f32 effective_separation_scale() {
-    return s_smoothed_closeup_scale;
+    return s_smoothed_closeup_scale * s_fov_scale;
 }
 
 } // namespace
@@ -219,14 +267,27 @@ bool active() {
     return current_mode() != AURORA_STEREO_OFF;
 }
 
+bool is_first_eye_of_frame() {
+    return !active() || s_current_eye == AURORA_EYE_LEFT;
+}
+
 void apply_config_from_settings() {
     // stereoHudDepth slider value -20..20 maps to UV-space horizontal parallax
     // -0.02..0.02 (i.e. up to 2% of screen width). Positive = HUD pops in
     // front of the screen plane.
     const f32 hudDepthUv = getSettings().game.stereoHudDepth.getValue() * 0.001f;
+    // eyeSeparation must carry the SAME effective_separation_scale() factor
+    // current_eye_offset_x()/push_eye_offset() use for the actual per-eye
+    // view/proj shift. Aurora's GX-layer texgen corrections (water
+    // reflection PTTEXMTX, screen-space refraction) read this config
+    // directly rather than the game's live camera state, so passing the raw
+    // slider value here would decouple them from the real eye offset the
+    // instant close-up scale, FoV auto-scale, or the auto-convergence
+    // depth-lock kicks in -- the exact "surface floats off the magnet"
+    // class of artifact documented on current_projection_shear_x().
     const AuroraStereoConfig cfg{
         .mode = current_mode(),
-        .eyeSeparation = getSettings().game.stereoEyeSeparation.getValue(),
+        .eyeSeparation = getSettings().game.stereoEyeSeparation.getValue() * effective_separation_scale(),
         .convergence = effective_convergence(),
         .hudDepth = hudDepthUv,
         .refractionAmplitudeScale = std::clamp(
@@ -400,123 +461,14 @@ void closeup_scale_tick() {
     }
 }
 
-namespace {
-
-f32 distance_to(const cXyz& a, const cXyz& b) {
-    const f32 dx = a.x - b.x;
-    const f32 dy = a.y - b.y;
-    const f32 dz = a.z - b.z;
-    return std::sqrt(dx * dx + dy * dy + dz * dz);
-}
-
-// Convert a D24 depth-buffer value (0..0xFFFFFF) into camera-forward distance,
-// inverting the GameCube perspective projection:
-//   z_depth = -m22 - m23/(-depth)   with m22, m23 from the projection matrix.
-//   depth   = m23 / (z_depth + m22)
-// Returns 0 on degenerate inputs (caller treats that as "no signal").
-f32 depth_buffer_z_to_view_distance(u32 z_uint, const camera_process_class& camera) {
-    if (z_uint == 0 || z_uint >= 0x00FFFFFE) {
-        return 0.0f; // near plane or sky/clear -- skip
-    }
-    const f32 z_depth = static_cast<f32>(z_uint) / 16777215.0f;
-    const f32 m22 = camera.view.projMtx[2][2];
-    const f32 m23 = camera.view.projMtx[2][3];
-    const f32 denom = z_depth + m22;
-    if (std::abs(denom) <= 1e-6f) {
-        return 0.0f;
-    }
-    const f32 depth = m23 / denom;
-    return depth > 0.0f ? depth : 0.0f;
-}
-
-void publish_effective_convergence() {
-    apply_config_from_settings(); // pulls effective_convergence() under the hood
-}
-
-} // namespace
-
-void auto_convergence_tick() {
-    if (!getSettings().game.enableAutoConvergence.getValue()) {
-        return;
-    }
-    if (!active()) {
-        return;
-    }
-    camera_process_class* camera = dComIfGp_getCamera(0);
+void fov_scale_tick() {
+    const camera_process_class* camera = dComIfGp_getCamera(0);
     if (camera == nullptr) {
         return;
     }
-
-    // Dialog open: freeze the comfort plane so it doesn't jump when the text
-    // box appears. We do NOT republish here -- whatever apply_config did last
-    // frame stays in effect. dMsgObject_isTalkNowCheck is the universal "text
-    // is on screen" check; mItemInfo.mMesgStatus is item-flow-only (in fact
-    // never written anywhere in the codebase) and misses NPC / wolf-reaction
-    // / narrator dialogs.
-    if (is_text_box_active()) {
-        return;
-    }
-
-    const cXyz& cam_eye = camera->view.lookat.eye;
-    const cXyz& cam_center = camera->view.lookat.center;
-    f32 desired = 0.0f;
-    bool have_target = false;
-
-    // 1. Z-target lock-on: distance to the targeted actor.
-    daPy_py_c* player = dComIfGp_getLinkPlayer();
-    daAlink_c* alink = static_cast<daAlink_c*>(player); // Link is always a daAlink_c
-    if (alink != nullptr) {
-        if (fopAc_ac_c* target = alink->getAtnActor()) {
-            desired = distance_to(fopAcM_GetPosition(target), cam_eye);
-            have_target = true;
-        }
-        // 2. Aim mode: the sight reticle's world hit point. Multiply by 0.5
-        // so the target sits HALFWAY between the camera and the screen plane,
-        // i.e. the target POPS OUT toward the viewer instead of locking at
-        // screen depth. Aim feels much more positive with the target floating
-        // in front of you.
-        if (!have_target && alink->mSight.getDrawFlg()) {
-            if (const cXyz* sight_pos = alink->mSight.getPosP()) {
-                desired = distance_to(*sight_pos, cam_eye) * 0.5f;
-                have_target = true;
-            }
-        }
-    }
-    // 3. Cutscene / event: camera lookat distance is what the director points
-    //    the audience at.
-    if (!have_target && dComIfGp_event_runCheck()) {
-        desired = distance_to(cam_center, cam_eye);
-        have_target = true;
-    }
-    // 4. Fallback: depth at screen center via GXPeekZ (existing async readback
-    //    at ~30Hz, smoothing hides the lag).
-    if (!have_target) {
-        const u16 cx = static_cast<u16>(mDoGph_gInf_c::getWidthF() * 0.5f);
-        const u16 cy = static_cast<u16>(mDoGph_gInf_c::getHeightF() * 0.5f);
-        u32 z_uint = 0;
-        GXPeekZ(cx, cy, &z_uint);
-        const f32 depth = depth_buffer_z_to_view_distance(z_uint, *camera);
-        if (depth > 0.0f) {
-            desired = depth;
-            have_target = true;
-        }
-    }
-    if (!have_target) {
-        return;
-    }
-
-    // Clamp to a reasonable comfort range so a stray bad sample can't pin the
-    // comfort plane at 0 or infinity.
-    desired = std::clamp(desired, 50.0f, 10000.0f);
-
-    // Exponential smoothing. dt is approximated at 1/60 -- the smoothing
-    // window is in the 0.1s..0.5s range so frame-rate sensitivity is minor.
-    const f32 smoothing = getSettings().game.autoConvergenceSmoothing.getValue();
-    constexpr f32 kAssumedDt = 1.0f / 60.0f;
-    const f32 alpha = (smoothing <= 0.0f) ? 1.0f : std::clamp(kAssumedDt / smoothing, 0.0f, 1.0f);
-    s_auto_convergence = s_auto_convergence + alpha * (desired - s_auto_convergence);
-
-    publish_effective_convergence();
+    const f32 target = compute_fov_scale(camera->view.fovy);
+    const f32 maxStep = kFovScaleMaxStepPerSec * kAssumedFrameDt;
+    s_fov_scale += std::clamp(target - s_fov_scale, -maxStep, maxStep);
 }
 
 void pop_eye_offset() {
@@ -537,6 +489,15 @@ void pop_eye_offset() {
         }
         s_saved[i].valid = false;
     }
+}
+
+DebugState debug_state() {
+    return DebugState{
+        .fovScale = s_fov_scale,
+        .closeupScale = s_smoothed_closeup_scale,
+        .separationScale = effective_separation_scale(),
+        .convergence = effective_convergence(),
+    };
 }
 
 } // namespace dusk::stereo

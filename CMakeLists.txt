@@ -654,22 +654,21 @@ include(extern/aurora/cmake/AuroraCopyRuntimeDLLs.cmake)
 aurora_copy_runtime_dlls(dusklight)
 
 # LeiaSR runtime DLLs are delay-loaded so dusklight.exe still runs on machines
-# without the SDK runtime installed. At runtime they're discovered via the user's
-# PATH (the LeiaSR installer adds Platform/bin).
-if (WIN32 AND LEIASR_SDKROOT AND MSVC)
-    target_link_options(dusklight PRIVATE
-        /DELAYLOAD:simulatedreality.dll
-        /DELAYLOAD:SimulatedRealityCore.dll
-        /DELAYLOAD:SimulatedRealityDirectX.dll
-        /DELAYLOAD:SimulatedRealityCameras.dll
-        /DELAYLOAD:SimulatedRealityDisplays.dll
-        /DELAYLOAD:SimulatedRealityFaceTrackers.dll
-        /DELAYLOAD:SimulatedRealityHandTrackers.dll
-        /DELAYLOAD:SimulatedRealityUserModelers.dll
-        /DELAYLOAD:DimencoWeaving.dll
-        /DELAYLOAD:opencv_world343.dll
-    )
-    target_link_libraries(dusklight PRIVATE delayimp.lib)
+# without the SR Platform installed -- without this the Windows loader resolves
+# them before main() and refuses to launch with a modal popup naming a DLL
+# (usually opencv_world343.dll, which the SR import libs pull in via inlined
+# cv::String destructors even though we never write OpenCV code). At runtime
+# they're discovered via the user's PATH, which the LeiaSR installer populates
+# with Platform/bin.
+#
+# The DLL list itself lives in extern/aurora/extern/SR-lib/CMakeLists.txt so it
+# stays correct for every consumer as the SDK changes. Applied here rather than
+# on aurora_core because /DELAYLOAD cannot be baked into a static library -- it
+# has to land on the final executable. Verify with
+# `dumpbin /imports dusklight.exe | findstr ".dll"`: every SR/OpenCV DLL must
+# appear ONLY under "delay load imports".
+if (AURORA_ENABLE_LEIASR)
+    srlib_apply_delayload(dusklight)
 endif ()
 
 if (DUSK_SELECTED_OPT)

@@ -1,0 +1,79 @@
+name: Init submodules
+description: >
+  Check out the repository's submodules, including the private LeiaSR SDK
+  (bo3b/SR-lib, nested under extern/aurora) when a PAT with read access to it is
+  available. Without that PAT the SR SDK is skipped and the build simply drops
+  LeiaSR autostereoscopic output; every other stereo mode is unaffected. The SDK
+  is also skipped on non-Windows runners, where LeiaSR cannot build at all.
+
+inputs:
+  submodule-pat:
+    description: >
+      PAT with read access to the private submodules. Pass
+      `${{ secrets.SHARED_PAT || secrets.SUBMODULE_PAT }}`. Safe to leave empty
+      (forks, PRs from outside the repo) -- see above.
+    required: false
+    default: ''
+  leiasr:
+    description: >
+      Set to 'false' to skip the LeiaSR SDK even on Windows with a PAT present.
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Check out submodules
+      shell: bash
+      env:
+        SUBMODULE_PAT: ${{ inputs.submodule-pat }}
+        WANT_LEIASR: ${{ inputs.leiasr }}
+      run: |
+        set -euo pipefail
+
+        want_srlib=1
+        if [ "$WANT_LEIASR" != "true" ]; then
+          want_srlib=0
+        elif [ "${RUNNER_OS}" != "Windows" ]; then
+          # The SR runtime is Windows-only, so skip a 49 MB private clone on the
+          # Linux / macOS / Android runners.
+          want_srlib=0
+        elif [ -z "$SUBMODULE_PAT" ]; then
+          echo "::warning::No SHARED_PAT/SUBMODULE_PAT secret available; skipping the private LeiaSR SDK submodule. This build will have no LeiaSR autostereoscopic output."
+          want_srlib=0
+        fi
+
+        # Top level first (extern/aurora), so that aurora's own .gitmodules
+        # exists before we decide what to do about the SR SDK nested inside it.
+        git submodule update --init
+
+        if [ "$want_srlib" = "0" ]; then
+          # `update = none` makes the recursive pass below skip this submodule.
+          # aurora's CMakeLists checks for the checkout and leaves LeiaSR off
+          # rather than failing to configure.
+          git -C extern/aurora config submodule."extern/SR-lib".update none
+          git submodule update --init --recursive
+          exit 0
+        fi
+
+        # actions/checkout writes an http.https://github.com/.extraheader token
+        # into .git/config scoped to THIS repo, and git applies it to every
+        # github.com URL -- including bo3b/SR-lib, where it 401s. It has to come
+        # out before our own credentials can take effect; leaving it in place
+        # makes a perfectly good PAT look broken.
+        git config --local --unset-all http.https://github.com/.extraheader || true
+
+        # Must be --global, not --local and not `git -c`: `git submodule update`
+        # spawns a separate `git clone` process for each submodule, and that
+        # child reads global/system config plus its own (not yet existing) repo
+        # config -- it never sees this repo's local config. A --local rewrite is
+        # silently ignored and the private clone falls back to unauthenticated,
+        # which on a private repo means a credential prompt (a hang or an opaque
+        # failure, not a clear auth error).
+        git config --global \
+          url."https://x-access-token:${SUBMODULE_PAT}@github.com/".insteadOf "https://github.com/"
+
+        git submodule update --init --recursive
+
+        git config --global --remove-section \
+          url."https://x-access-token:${SUBMODULE_PAT}@github.com/" || true

@@ -9,9 +9,13 @@ description: >
 inputs:
   submodule-pat:
     description: >
-      PAT with read access to the private submodules. Pass
-      `${{ secrets.SHARED_PAT || secrets.SUBMODULE_PAT }}`. Safe to leave empty
-      (forks, PRs from outside the repo) -- see above.
+      PAT with read access to the private submodules; callers pass the
+      SHARED_PAT secret, falling back to SUBMODULE_PAT. Safe to leave empty
+      (forks, PRs from outside the repo) -- see above. Note for editors: no
+      expression syntax in this description. The runner evaluates it when it
+      loads the manifest, and an action manifest has no `secrets` context, so
+      quoting the caller's expression here fails the whole action to load
+      before any step runs.
     required: false
     default: ''
   leiasr:

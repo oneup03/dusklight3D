@@ -457,8 +457,9 @@ int daBoomerang_c::draw() {
     // Refresh cursor projections every frame regardless of FLG0_4 (in-flight)
     // or the event-running gate. setSight caches m_proj_posX/Y from the
     // current eye-shifted camera matrices; if we skip it while in a close-up
-    // (low eye separation), the cursors stay frozen at that shallow depth
-    // even after the close-up ends. Only the 2D dispatch below stays gated.
+    // (pulled-in convergence, so a shallower eye baseline), the cursors stay
+    // frozen at that shallow depth even after the close-up ends. Only the 2D
+    // dispatch below stays gated.
 #if TARGET_PC
     constexpr bool kAlwaysProjectCursors = true;
 #else

@@ -92,9 +92,13 @@ void set_value(GraphicsOption option, int value) {
         stereo::apply_config_from_settings();
         break;
     }
-    case GraphicsOption::StereoEyeSeparation:
-        getSettings().game.stereoEyeSeparation.setValue(
-            static_cast<float>(std::clamp(value, 0, 100)));
+    case GraphicsOption::StereoSeparation:
+        // Slider value 0..150 -> clip-space separation 0.000..0.150, i.e. each
+        // step is 0.1% of screen width of background disparity. The physical
+        // ceiling (divergence) is ~0.105 on a 27" 16:9 panel; the slider runs
+        // slightly past it because the limit scales with panel size.
+        getSettings().game.stereoSeparation.setValue(
+            static_cast<float>(std::clamp(value, 0, 150)) * 0.001f);
         stereo::apply_config_from_settings();
         break;
     case GraphicsOption::StereoConvergence:
@@ -118,6 +122,31 @@ void set_value(GraphicsOption option, int value) {
         getSettings().game.stereoRefractionScale.setValue(
             static_cast<float>(std::clamp(value, 0, 100)) * 0.01f);
         stereo::apply_config_from_settings();
+        break;
+    case GraphicsOption::StereoGhostContrast:
+        // Slider value 70..100 -> stored contrast 0.70..1.00. 100 is the exact
+        // no-op and the default.
+        getSettings().game.stereoGhostContrast.setValue(
+            static_cast<float>(std::clamp(value, 70, 100)) * 0.01f);
+        stereo::apply_config_from_settings();
+        break;
+    case GraphicsOption::StereoGhostBlackFloor:
+        // Slider value 0..10 -> stored lift 0.00..0.10. 0 is the exact no-op
+        // and the default; blacks turn visibly grey well before the top.
+        getSettings().game.stereoGhostBlackFloor.setValue(
+            static_cast<float>(std::clamp(value, 0, 10)) * 0.01f);
+        stereo::apply_config_from_settings();
+        break;
+    case GraphicsOption::StereoAutoConvTarget:
+        // Slider value 10..80 -> 0.010..0.080, the same screen-width-fraction
+        // units the Separation slider uses (one step = 0.1% of screen width).
+        getSettings().game.stereoAutoConvTarget.setValue(
+            static_cast<float>(std::clamp(value, 10, 80)) * 0.001f);
+        break;
+    case GraphicsOption::StereoAutoConvSmoothing:
+        // Slider value 1..25 -> EMA rate 0.01..0.25 per frame.
+        getSettings().game.stereoAutoConvSmoothing.setValue(
+            static_cast<float>(std::clamp(value, 1, 25)) * 0.01f);
         break;
     }
 }
@@ -232,10 +261,12 @@ int get_graphics_setting_value(GraphicsOption option) {
         return getSettings().game.enableTextureReplacements.getValue();
     case GraphicsOption::StereoMode:
         return static_cast<int>(getSettings().game.stereoMode.getValue());
-    case GraphicsOption::StereoEyeSeparation:
-        // separation slider 0..100 -> 0..100 game units (TP is roughly cm).
+    case GraphicsOption::StereoSeparation:
+        // 0.000..0.150 stored -> slider value 0..150 (one step = 0.1% of
+        // screen width).
         return std::clamp(
-            static_cast<int>(getSettings().game.stereoEyeSeparation.getValue() + 0.5f), 0, 100);
+            static_cast<int>(std::round(getSettings().game.stereoSeparation.getValue() * 1000.0f)),
+            0, 150);
     case GraphicsOption::StereoConvergence:
         // convergence slider 1..60 -> 25..1500 game units (step 25 = ~25cm).
         return std::clamp(
@@ -255,6 +286,26 @@ int get_graphics_setting_value(GraphicsOption option) {
         return std::clamp(
             static_cast<int>(std::round(getSettings().game.stereoRefractionScale.getValue() * 100.0f)),
             0, 100);
+    case GraphicsOption::StereoGhostContrast:
+        // 0.70..1.00 stored -> slider value 70..100
+        return std::clamp(
+            static_cast<int>(std::round(getSettings().game.stereoGhostContrast.getValue() * 100.0f)),
+            70, 100);
+    case GraphicsOption::StereoGhostBlackFloor:
+        // 0.00..0.10 stored -> slider value 0..10
+        return std::clamp(
+            static_cast<int>(std::round(getSettings().game.stereoGhostBlackFloor.getValue() * 100.0f)),
+            0, 10);
+    case GraphicsOption::StereoAutoConvTarget:
+        // 0.010..0.080 stored -> slider value 10..80
+        return std::clamp(
+            static_cast<int>(std::round(getSettings().game.stereoAutoConvTarget.getValue() * 1000.0f)),
+            10, 80);
+    case GraphicsOption::StereoAutoConvSmoothing:
+        // 0.01..0.25 stored -> slider value 1..25
+        return std::clamp(
+            static_cast<int>(std::round(getSettings().game.stereoAutoConvSmoothing.getValue() * 100.0f)),
+            1, 25);
     }
     return 0;
 }
@@ -327,8 +378,13 @@ Rml::String format_graphics_setting_value(GraphicsOption option, int value) {
                        : "LeiaSR (unavailable)";
         }
         break;
-    case GraphicsOption::StereoEyeSeparation:
-        return fmt::format("{} units", value);
+    case GraphicsOption::StereoSeparation:
+        // Shown as what it physically is: the width of the gap between the two
+        // eyes' copies of an object at infinity, as a percentage of the screen.
+        if (value == 0) {
+            return "Off (2D)";
+        }
+        return fmt::format("{}.{}% of screen", value / 10, value % 10);
     case GraphicsOption::StereoConvergence:
         return fmt::format("{} units", value * 25);
     case GraphicsOption::StereoHudDepth:
@@ -336,6 +392,22 @@ Rml::String format_graphics_setting_value(GraphicsOption option, int value) {
     case GraphicsOption::StereoFpSeparationScale:
         return fmt::format("{}%", value);
     case GraphicsOption::StereoRefractionScale:
+        return fmt::format("{}%", value);
+    case GraphicsOption::StereoGhostContrast:
+        if (value >= 100) {
+            return "Off";
+        }
+        return fmt::format("{}%", value);
+    case GraphicsOption::StereoGhostBlackFloor:
+        if (value <= 0) {
+            return "Off";
+        }
+        return fmt::format("{}%", value);
+    case GraphicsOption::StereoAutoConvTarget:
+        // Same units and formatting as Separation, so the two read against each
+        // other directly ("pop-out budget 3.0% vs background depth 5.0%").
+        return fmt::format("{}.{}% of screen", value / 10, value % 10);
+    case GraphicsOption::StereoAutoConvSmoothing:
         return fmt::format("{}%", value);
     }
     return "";

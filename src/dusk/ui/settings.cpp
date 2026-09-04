@@ -889,47 +889,56 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .valueMax = static_cast<int>(StereoMode::LeiaSR),
                 .defaultValue = static_cast<int>(StereoMode::Off),
             });
-        graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.stereoEyeSeparation,
+        graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.stereoSeparation,
             GraphicsTunerProps{
-                .option = GraphicsOption::StereoEyeSeparation,
-                .title = "Eye Separation",
-                .helpText = "Distance between the left and right eye cameras, in world units."
-                            " TP world units are roughly centimeters. Higher values produce a"
-                            " stronger 3D effect.",
+                .option = GraphicsOption::StereoSeparation,
+                .title = "Separation",
+                .helpText = "Strength of the 3D effect, measured as how far apart the two eyes'"
+                            " copies of a distant object sit, as a percentage of screen width."
+                            " This stays constant no matter how the game's camera zooms. Above"
+                            " roughly 10% your eyes have to turn outward to fuse the image on a"
+                            " typical 27-inch screen, which cannot be done comfortably; on a"
+                            " larger screen the comfortable limit is lower. Default 5.0%.",
                 .valueMin = 0,
-                .valueMax = 100,
-                .defaultValue = 30,
+                .valueMax = 150,
+                .defaultValue = 50,
             });
         graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.stereoConvergence,
             GraphicsTunerProps{
                 .option = GraphicsOption::StereoConvergence,
                 .title = "Convergence",
                 .helpText = "Distance at which objects appear flush with the screen, in world"
-                            " units. Each step is 25 units (~25cm). Closer values bring nearer"
-                            " geometry forward; farther values push everything into the screen.",
+                            " units. Each step is 25 units (~25cm). Lower values push more of"
+                            " the scene behind the screen; higher values bring more of it out in"
+                            " front. It no longer changes how deep the background looks -- that"
+                            " is Separation's job -- so raising it now spends more of your total"
+                            " depth budget rather than less.",
                 .valueMin = 1,
                 .valueMax = 60,
-                .defaultValue = 12, // 12 * 25 = 300 world units, ~3m
+                .defaultValue = 6, // 6 * 25 = 150 world units, ~1.5m
             });
         graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.stereoHudDepth,
             GraphicsTunerProps{
                 .option = GraphicsOption::StereoHudDepth,
                 .title = "HUD Depth",
-                .helpText = "Push the HUD in front of (positive) or behind (negative) the screen"
+                .helpText = "Push the HUD behind (positive) or in front of (negative) the screen"
                             " plane. 0 keeps the HUD flat on the screen. Each step is ~0.1% of"
-                            " screen width per eye.",
+                            " screen width per eye. Default 5.",
                 .valueMin = -30,
                 .valueMax = 30,
-                .defaultValue = -10,
+                .defaultValue = 5,
             });
         graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.stereoFpSeparationScale,
             GraphicsTunerProps{
                 .option = GraphicsOption::StereoFpSeparationScale,
-                .title = "Close-Up Eye Sep Scale",
-                .helpText = "Multiplier on Eye Separation applied when a close-up subject dominates"
-                            " the frame: first-person aim modes (bow, slingshot, clawshot, dominion"
-                            " rod) and any open dialog/message box. Lower values reduce parallax so"
-                            " near content doesn't strain the eyes. Default 10%.",
+                .title = "Close-Up Convergence Scale",
+                .helpText = "Automatically pulls Convergence in by this much when a close-up"
+                            " subject dominates the frame: first-person aim modes (bow, slingshot,"
+                            " clawshot, dominion rod) and any open dialog/message box. That brings"
+                            " the screen plane to the near subject so it doesn't pop uncomfortably"
+                            " far forward, and leaves the background depth untouched. Your"
+                            " Convergence setting is always the ceiling -- this only ever pulls"
+                            " closer. Default 10%.",
                 .valueMin = 1,
                 .valueMax = 35,
                 .defaultValue = 10,
@@ -947,6 +956,72 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .valueMin = 0,
                 .valueMax = 100,
                 .defaultValue = 30,
+            });
+        graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.stereoGhostContrast,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoGhostContrast,
+                .title = "Ghost Reduction: Contrast",
+                .helpText = "Reduces ghosting -- a faint copy of one eye's image bleeding into the"
+                            " other -- by squeezing the picture's contrast toward mid grey before"
+                            " it reaches the display. How visible a leak is depends on the"
+                            " brightness difference between the eyes, so shrinking that difference"
+                            " shrinks the ghost. Costs contrast across the whole image. Try 90%"
+                            " first and go lower only if edges still ghost. Off leaves the image"
+                            " untouched.",
+                .valueMin = 70,
+                .valueMax = 100,
+                .defaultValue = 100,
+            });
+        graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.stereoGhostBlackFloor,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoGhostBlackFloor,
+                .title = "Ghost Reduction: Black Floor",
+                .helpText = "Raises the darkest black the image can reach, leaving white alone."
+                            " Displays that cancel crosstalk themselves -- LeiaSR and other"
+                            " autostereo panels -- subtract part of the opposite eye, which drives"
+                            " dark pixels below black where they get clipped, and the clipped part"
+                            " is what you see as a ghost. This gives that subtraction room to"
+                            " work. 2-5% is usually enough; blacks turn grey quickly above that."
+                            " Has no effect on displays that don't cancel, such as anaglyph"
+                            " glasses or passive 3D monitors -- use Contrast there instead.",
+                .valueMin = 0,
+                .valueMax = 10,
+                .defaultValue = 0,
+            });
+        config_bool_select(leftPane, rightPane, getSettings().game.stereoAutoConvergence,
+            {
+                .key = "Auto Convergence",
+                .helpText = "Watch the depth buffer and automatically bring the screen plane"
+                            " closer when something near fills the view, so it never pops"
+                            " uncomfortably far out of the screen. Your Convergence setting stays"
+                            " the limit -- this only ever pulls closer, never further. Background"
+                            " depth is unaffected."
+            });
+        graphics_tuner_control(*this, leftPane, rightPane, getSettings().game.stereoAutoConvTarget,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoAutoConvTarget,
+                .title = "Auto Convergence Limit",
+                .helpText = "How far the nearest object is allowed to pop out of the screen before"
+                            " Auto Convergence pulls the screen plane in, measured the same way as"
+                            " Separation: a percentage of screen width. Lower is more cautious and"
+                            " keeps the screen plane closer to you; higher allows more pop-out."
+                            " Only used when Auto Convergence is on. Default 3.0%.",
+                .valueMin = 10,
+                .valueMax = 80,
+                .defaultValue = 30,
+            });
+        graphics_tuner_control(*this, leftPane, rightPane,
+            getSettings().game.stereoAutoConvSmoothing,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoAutoConvSmoothing,
+                .title = "Auto Convergence Response",
+                .helpText = "How quickly Auto Convergence follows the scene. Higher reacts faster"
+                            " but can feel restless as the camera moves; lower is calmer but lags"
+                            " behind sudden close-ups. Only used when Auto Convergence is on."
+                            " Default 8%.",
+                .valueMin = 1,
+                .valueMax = 25,
+                .defaultValue = 8,
             });
     });
 

@@ -2246,7 +2246,7 @@ int mDoGph_Painter() {
 #if TARGET_PC
         // Shift the 2D ortho bounds horizontally per eye when stereo + HUD
         // depth are active so hearts, rupees, button hints and the mini-map
-        // get a fixed parallax depth (positive = pops forward).
+        // get a fixed parallax depth (positive = pushed into the screen).
         const f32 hudShift = dusk::stereo::hud_ortho_shift_x();
 #else
         constexpr f32 hudShift = 0.0f;

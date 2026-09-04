@@ -95,10 +95,25 @@ namespace dusk {
             ImGui::SeparatorText("Stereo 3D Debug");
             const auto dbg = dusk::stereo::debug_state();
             ImGui::Text("Fovy (raw): %.2f deg", cam->view.fovy);
-            ImGui::Text("FoV scale: %.3f", dbg.fovScale);
-            ImGui::Text("Closeup scale: %.3f", dbg.closeupScale);
-            ImGui::Text("Separation scale (combined): %.3f", dbg.separationScale);
+            ImGui::Text("tan(half horiz FoV): %.4f", dbg.tanHalfH);
+            ImGui::Text("Separation (clip space): %.4f  (%.1f%% of screen)", dbg.separation,
+                dbg.separation * 100.0f);
+            ImGui::Text("Closeup convergence scale: %.3f", dbg.closeupScale);
             ImGui::Text("Convergence (effective): %.1f", dbg.convergence);
+            // Derived, not stored -- expected to move with both FoV and
+            // convergence. A constant reading here means something upstream is
+            // caching it.
+            ImGui::Text("Eye baseline (derived): %.2f units", dbg.eyeBaseline);
+            if (getSettings().game.stereoAutoConvergence.getValue()) {
+                if (!dbg.autoConvDepthAvailable) {
+                    ImGui::TextColored(ImVec4(1.f, 0.5f, 0.f, 1.f),
+                        "Auto convergence: NO DEPTH SNAPSHOT");
+                } else {
+                    ImGui::Text("Auto convergence: %s  (ceiling %.1f)",
+                        dbg.autoConvEngaged ? "engaged" : "idle", dbg.manualConvergence);
+                    ImGui::Text("Nearest depth (smoothed): %.1f units", dbg.autoConvNearDepth);
+                }
+            }
             ImGui::Text("Close-up focus active: %s", dusk::stereo::is_close_up_focus_active() ? "TRUE" : "false");
             if (auto* player = dComIfGp_getLinkPlayer()) {
                 auto* alink = static_cast<daAlink_c*>(player);

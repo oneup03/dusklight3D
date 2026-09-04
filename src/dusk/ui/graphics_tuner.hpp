@@ -48,11 +48,15 @@ enum class GraphicsOption {
     DepthOfFieldMode,
     TextureReplacements,
     StereoMode,
-    StereoEyeSeparation,
+    StereoSeparation,
     StereoConvergence,
     StereoHudDepth,
     StereoFpSeparationScale,
     StereoRefractionScale,
+    StereoGhostContrast,
+    StereoGhostBlackFloor,
+    StereoAutoConvTarget,
+    StereoAutoConvSmoothing,
 };
 
 Rml::String format_graphics_setting_value(GraphicsOption option, int value);

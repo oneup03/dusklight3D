@@ -37,6 +37,7 @@ compile_commands.json
 # Miscellaneous
 *.exe
 *.zip
+TPHD-3D/
 
 # MacOS
 .DS_Store

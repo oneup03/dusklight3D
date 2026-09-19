@@ -5,12 +5,14 @@
 #include "dusk/config.hpp"
 #include "dusk/logging.h"
 #include "dusk/settings.h"
+#include "dusk/stereo.h"
 #include "m_Do/m_Do_audio.h"
 
 #include <dolphin/gx/GXAurora.h>
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <type_traits>
 
@@ -79,6 +81,61 @@ Rml::String format_percent(int value) { return fmt::format("{}%", value); }
 
 Rml::String format_bool(int value) { return value ? "On" : "Off"; }
 
+Rml::String format_stereo_mode(int value) {
+    switch (static_cast<StereoMode>(value)) {
+    case StereoMode::Off:
+        return "Off";
+    case StereoMode::SideBySide:
+        return "Side-by-Side";
+    case StereoMode::TopBottom:
+        return "Top-and-Bottom";
+    case StereoMode::RowInterlaced:
+        return "Row Interlaced";
+    case StereoMode::ColumnInterlaced:
+        return "Column Interlaced";
+    case StereoMode::Checkerboard:
+        return "Checkerboard";
+    case StereoMode::Anaglyph:
+        return "Anaglyph (Red/Cyan)";
+    case StereoMode::LeiaSR:
+        // Selectable even with no Leia display attached: the present path falls
+        // back to a mono compose until one appears, so plugging one in just
+        // starts working without re-picking the mode.
+        return aurora_stereo_mode_supported(AURORA_STEREO_LEIASR) ? "LeiaSR"
+                                                                  : "LeiaSR (unavailable)";
+    default:
+        return "";
+    }
+}
+
+// Tenths of a percent of screen width -- the unit both Separation and the
+// auto-convergence pop-out budget are expressed in, so the two read against
+// each other directly ("pop-out budget 3.0% vs background depth 5.0%").
+Rml::String format_screen_fraction(int value) {
+    return fmt::format("{}.{}% of screen", value / 10, value % 10);
+}
+
+Rml::String format_stereo_separation(int value) {
+    if (value == 0) {
+        return "Off (2D)";
+    }
+    return format_screen_fraction(value);
+}
+
+Rml::String format_stereo_convergence(int value) { return fmt::format("{} units", value * 25); }
+
+Rml::String format_stereo_hud_depth(int value) { return fmt::format("{:+d} units", value); }
+
+// 100% contrast and a 0% black floor are the exact no-ops, so label them as off
+// rather than as a value.
+Rml::String format_ghost_contrast(int value) {
+    return value >= 100 ? "Off" : fmt::format("{}%", value);
+}
+
+Rml::String format_ghost_black_floor(int value) {
+    return value <= 0 ? "Off" : fmt::format("{}%", value);
+}
+
 template <typename T>
 int read_cvar(const ConfigVar<T>& var) {
     if constexpr (std::is_same_v<T, float>) {
@@ -110,6 +167,47 @@ const GraphicsSetting& bind(Min min, Max max, Def def, int step, Rml::String (*l
         .watchesRenderSize = watchSize,
         .read = []() -> int { return read_cvar(Var()); },
         .write = [](int value) { write_cvar(Var(), value); },
+        .label = label,
+        .cvarName = []() -> const char* { return Var().getName(); },
+        .isModified = []() -> bool { return Var().getValue() != Var().getDefaultValue(); },
+    };
+    return desc;
+}
+
+// Stereo sliders need two things bind() doesn't offer: a per-setting ratio
+// between the slider integer and the stored value (one click is 0.1% of screen
+// width for Separation and 25 world units for Convergence, a whole percent for
+// most of the rest), and a push into aurora after every write. Num/Den express
+// that ratio as slider = stored * Num / Den. Apply is false only for the two
+// auto-convergence tuning knobs, which the control loop reads live rather than
+// through AuroraStereoConfig.
+template <auto Var, int Num = 1, int Den = 1, bool Apply = true>
+const GraphicsSetting& bind_stereo(int min, int max, int def, Rml::String (*label)(int)) {
+    using Stored = std::decay_t<decltype(Var().getValue())>;
+    static const GraphicsSetting desc{
+        .min = min,
+        .max = max,
+        .defaultValue = def,
+        .step = 1,
+        .read = []() -> int {
+            if constexpr (std::is_enum_v<Stored>) {
+                return static_cast<int>(Var().getValue());
+            } else {
+                return static_cast<int>(std::lround(
+                    Var().getValue() * static_cast<float>(Num) / static_cast<float>(Den)));
+            }
+        },
+        .write = [](int value) {
+            if constexpr (std::is_enum_v<Stored>) {
+                Var().setValue(static_cast<Stored>(value));
+            } else {
+                Var().setValue(
+                    static_cast<float>(value) * static_cast<float>(Den) / static_cast<float>(Num));
+            }
+            if constexpr (Apply) {
+                stereo::apply_config_from_settings();
+            }
+        },
         .label = label,
         .cvarName = []() -> const char* { return Var().getName(); },
         .isModified = []() -> bool { return Var().getValue() != Var().getDefaultValue(); },
@@ -164,6 +262,41 @@ const GraphicsSetting& GraphicsSetting::of(GraphicsOption option) {
     case GraphicsOption::TextureReplacements:
         return bind<[]() -> auto& { return getSettings().game.enableTextureReplacements; }>(
             0, 1, 0, 1, format_bool);
+    case GraphicsOption::StereoMode:
+        return bind_stereo<[]() -> auto& { return getSettings().game.stereoMode; }>(
+            static_cast<int>(StereoMode::Off), static_cast<int>(StereoMode::LeiaSR),
+            static_cast<int>(StereoMode::Off), format_stereo_mode);
+    case GraphicsOption::StereoSeparation:
+        // 0.000..0.150 stored, one click = 0.1% of screen width.
+        return bind_stereo<[]() -> auto& { return getSettings().game.stereoSeparation; }, 1000>(
+            0, 150, 50, format_stereo_separation);
+    case GraphicsOption::StereoConvergence:
+        // 25..1500 world units stored, one click = 25 units (~25cm).
+        return bind_stereo<[]() -> auto& { return getSettings().game.stereoConvergence; }, 1, 25>(
+            1, 60, 6, format_stereo_convergence);
+    case GraphicsOption::StereoHudDepth:
+        return bind_stereo<[]() -> auto& { return getSettings().game.stereoHudDepth; }>(
+            -30, 30, 5, format_stereo_hud_depth);
+    case GraphicsOption::StereoFpSeparationScale:
+        return bind_stereo<[]() -> auto& { return getSettings().game.stereoFpSeparationScale; },
+            100>(1, 35, 10, format_percent);
+    case GraphicsOption::StereoRefractionScale:
+        return bind_stereo<[]() -> auto& { return getSettings().game.stereoRefractionScale; },
+            100>(0, 100, 30, format_percent);
+    case GraphicsOption::StereoGhostContrast:
+        return bind_stereo<[]() -> auto& { return getSettings().game.stereoGhostContrast; }, 100>(
+            70, 100, 100, format_ghost_contrast);
+    case GraphicsOption::StereoGhostBlackFloor:
+        return bind_stereo<[]() -> auto& { return getSettings().game.stereoGhostBlackFloor; },
+            100>(0, 10, 0, format_ghost_black_floor);
+    case GraphicsOption::StereoAutoConvTarget:
+        // Same screen-width-fraction units as Separation. Read live by the
+        // auto-convergence loop, so no AuroraStereoConfig push is needed.
+        return bind_stereo<[]() -> auto& { return getSettings().game.stereoAutoConvTarget; }, 1000,
+            1, false>(10, 80, 30, format_screen_fraction);
+    case GraphicsOption::StereoAutoConvSmoothing:
+        return bind_stereo<[]() -> auto& { return getSettings().game.stereoAutoConvSmoothing; },
+            100, 1, false>(1, 25, 8, format_percent);
     }
     DuskLog.error("{} is an invalid GraphicsOption", static_cast<int>(option));
     abort();

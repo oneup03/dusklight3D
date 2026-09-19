@@ -318,6 +318,7 @@ template class ConfigImpl<DiscVerificationState>;
 template class ConfigImpl<GameLanguage>;
 template class ConfigImpl<AudioOutputMode>;
 template class ConfigImpl<LetterboxMode>;
+template class ConfigImpl<StereoMode>;
 
 template <>
 void ConfigImpl<FrameInterpMode>::loadFromJson(

@@ -88,6 +88,17 @@ enum class AudioOutputMode : u8 {
     Surround8ch = 3,        // discrete 7.1
 };
 
+enum class StereoMode : int {
+    Off = 0,
+    SideBySide = 1,
+    TopBottom = 2,
+    RowInterlaced = 3,
+    ColumnInterlaced = 4,
+    Checkerboard = 5,
+    Anaglyph = 6,
+    LeiaSR = 7,
+};
+
 namespace config {
 template <>
 struct ConfigEnumRange<BloomMode> {
@@ -159,6 +170,12 @@ template <>
 struct ConfigEnumRange<AudioOutputMode> {
     static constexpr auto min = AudioOutputMode::StereoSpeakers;
     static constexpr auto max = AudioOutputMode::Surround8ch;
+};
+
+template <>
+struct ConfigEnumRange<StereoMode> {
+    static constexpr auto min = StereoMode::Off;
+    static constexpr auto max = StereoMode::LeiaSR;
 };
 
 template <>
@@ -252,6 +269,32 @@ struct UserSettings {
         ConfigVar<bool> disableCutscenePillarboxing;
         ConfigVar<LetterboxMode> disableLetterboxing;
         ConfigVar<bool> enableHighQualityMinimapTextures;
+        ConfigVar<StereoMode> stereoMode;
+        // Clip-space separation: total background disparity as a FRACTION OF
+        // SCREEN WIDTH (0.05 = objects at infinity sit 5% of the screen apart).
+        // Bounded by divergence at roughly IPD/screen_width (~0.105 on a 27"
+        // 16:9 panel). See the header comment in dusk/stereo.h.
+        ConfigVar<float> stereoSeparation;
+        // LEGACY: eye separation in world units, superseded by stereoSeparation.
+        // Kept registered so an existing profile still loads it and
+        // dusk::stereo::migrate_legacy_config() can convert it exactly once.
+        // Not exposed in the UI; do not read it outside that migration.
+        ConfigVar<float> stereoEyeSeparation;
+        ConfigVar<float> stereoConvergence;
+        ConfigVar<float> stereoHudDepth;
+        ConfigVar<float> stereoFpSeparationScale;
+        ConfigVar<float> stereoRefractionScale;
+        // Ghost / crosstalk reduction, applied in the compose pass. Contrast
+        // 1.0 and black floor 0.0 are exact no-ops. See AuroraStereoConfig.
+        ConfigVar<float> stereoGhostContrast;
+        ConfigVar<float> stereoGhostBlackFloor;
+        // Depth-buffer-driven auto-convergence. Target is the total crossed
+        // (pop-out) disparity budget for the nearest object, in the same
+        // screen-width-fraction units as stereoSeparation. Smoothing is the
+        // per-frame EMA rate applied in 1/convergence space.
+        ConfigVar<bool> stereoAutoConvergence;
+        ConfigVar<float> stereoAutoConvTarget;
+        ConfigVar<float> stereoAutoConvSmoothing;
 
         // Audio
         ConfigVar<bool> noLowHpSound;

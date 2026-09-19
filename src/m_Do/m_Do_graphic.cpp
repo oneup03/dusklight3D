@@ -53,6 +53,7 @@
 #include "dusk/interp/frame_interpolation.h"
 #include "dusk/logging.h"
 #include "dusk/settings.h"
+#include "dusk/stereo.h"
 #include "helpers/endian.h"
 #include "helpers/gx_helper.h"
 
@@ -2184,7 +2185,13 @@ int mDoGph_Painter() {
     }
 
 #if TARGET_PC
-    dusk::g_imguiConsole.PreDraw();
+    // Stereo mode invokes this function once per eye; PreDraw() only builds
+    // the ImGui widget tree (menu bar, F-key debug toggles) and must run
+    // exactly once per real frame or F-key toggles double-flip and the
+    // window never stays open (see dusk::stereo::is_first_eye_of_frame()).
+    if (dusk::stereo::is_first_eye_of_frame()) {
+        dusk::g_imguiConsole.PreDraw();
+    }
 #endif
 
     #if DEBUG
@@ -2208,9 +2215,19 @@ int mDoGph_Painter() {
     GXSetDither(GX_ENABLE);
 
     J2DOrthoGraph ortho(0.0f, 0.0f, FB_WIDTH, FB_HEIGHT, -1.0f, 1.0f);
-    ortho.setOrtho(mDoGph_gInf_c::getMinXF(), mDoGph_gInf_c::getMinYF(),
-                   mDoGph_gInf_c::getWidthF(), mDoGph_gInf_c::getHeightF(),
-                   -1.0f, 1.0f);
+    {
+#if TARGET_PC
+        // Shift the 2D ortho bounds horizontally per eye when stereo + HUD
+        // depth are active so hearts, rupees, button hints and the mini-map
+        // get a fixed parallax depth (positive = pushed into the screen).
+        const f32 hudShift = dusk::stereo::hud_ortho_shift_x();
+#else
+        constexpr f32 hudShift = 0.0f;
+#endif
+        ortho.setOrtho(mDoGph_gInf_c::getMinXF() + hudShift, mDoGph_gInf_c::getMinYF(),
+                       mDoGph_gInf_c::getWidthF(), mDoGph_gInf_c::getHeightF(),
+                       -1.0f, 1.0f);
+    }
     ortho.setPort();
 
     #if DEBUG
@@ -2598,6 +2615,15 @@ int mDoGph_Painter() {
 
                 cMtx_lookAt(m2, &sp38c, &cXyz::Zero, &sp398, 0);
                 j3dSys.setViewMtx(m2);
+                // Note: dComIfGd_drawXluList2DScreen here uses hardcoded view
+                // and projection (m2 / m above), independent of camera_p->view.
+                // In stereo mode this means any geometry in the 2DScreen
+                // drawlist (the underwater shimmer model, kytag15 effects) is
+                // rendered without per-eye parallax -- it sits at screen depth
+                // instead of the actual water-surface depth. This is a known
+                // limitation of Phase 1 stereo support; correctly fixing it
+                // would require per-shader stereo fixes (TPHD-3D-style) which
+                // Aurora doesn't have hook points for.
                 GX_DEBUG_GROUP(dComIfGd_drawXluList2DScreen);
 
                 j3dSys.setViewMtx(camera_p->view.viewMtx);
@@ -2746,9 +2772,18 @@ int mDoGph_Painter() {
     dDlst_list_c::calcWipe();
     j3dSys.reinitGX();
 
-    ortho.setOrtho(mDoGph_gInf_c::getMinXF(), mDoGph_gInf_c::getMinYF(),
-                   mDoGph_gInf_c::getWidthF(), mDoGph_gInf_c::getHeightF(),
-                   100000.0f, -100000.0f);
+    {
+#if TARGET_PC
+        // Per-eye HUD parallax shift -- see the earlier setOrtho in this file
+        // for the rationale.
+        const f32 hudShift = dusk::stereo::hud_ortho_shift_x();
+#else
+        constexpr f32 hudShift = 0.0f;
+#endif
+        ortho.setOrtho(mDoGph_gInf_c::getMinXF() + hudShift, mDoGph_gInf_c::getMinYF(),
+                       mDoGph_gInf_c::getWidthF(), mDoGph_gInf_c::getHeightF(),
+                       100000.0f, -100000.0f);
+    }
     ortho.setPort();
 
     #if DEBUG
@@ -2833,7 +2868,9 @@ int mDoGph_Painter() {
     #endif
 
 #if TARGET_PC
-    dusk::g_imguiConsole.PostDraw();
+    if (dusk::stereo::is_first_eye_of_frame()) {
+        dusk::g_imguiConsole.PostDraw();
+    }
 #endif
 
     mDoGph_gInf_c::endRender();

@@ -1561,6 +1561,7 @@ set(DUSK_FILES
         src/dusk/save_manager.hpp
         src/dusk/settings.cpp
         src/dusk/speedrun.cpp
+        src/dusk/stereo.cpp
         src/dusk/stubs.cpp
         src/dusk/texture_replacements.cpp
         src/dusk/texture_replacements.hpp

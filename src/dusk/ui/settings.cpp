@@ -1030,10 +1030,12 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             GraphicsTunerProps{
                 .option = GraphicsOption::StereoAutoConvSmoothing,
                 .title = "Auto Convergence Response",
-                .helpText = "How quickly Auto Convergence follows the scene. Higher reacts faster"
-                            " but can feel restless as the camera moves; lower is calmer but lags"
-                            " behind sudden close-ups. Only used when Auto Convergence is on."
-                            " Default 8%.",
+                .helpText = "How quickly Auto Convergence pulls in when something gets close."
+                            " Higher reacts faster but can feel restless as the camera moves;"
+                            " lower is calmer but lags behind approaching objects. Easing back"
+                            " out afterwards is always slower than this, and a hard cut to a"
+                            " close shot snaps rather than eases. Only used when Auto Convergence"
+                            " is on. Default 8%.",
             });
     });
 

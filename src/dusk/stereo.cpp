@@ -191,6 +191,34 @@ constexpr f32 kAutoConvEmaFar = 0.05f;
 // world units is simultaneously too twitchy up close and too sluggish at range.
 constexpr f32 kAutoConvDeadband = 0.005f;
 
+// Release rate on the 1/convergence smoother, as a fraction of the user's
+// pull-in rate. Same asymmetry argument as the EMA rates above, one stage
+// further down the loop -- see the note at the smoothing site.
+constexpr f32 kAutoConvReleaseRatio = 0.43f;
+
+// --- camera-cut detection ---------------------------------------------------
+// Fires when a raw sample reads this many times NEARER than the smoothed
+// estimate. Expressed as a ratio rather than as |z - ema| / ema, because that
+// relative difference is 1 - z/ema on approach and so can never exceed 1 no
+// matter how close the object gets: any threshold at or above 1 built on it
+// would fire only for recession, the one direction with nothing to protect
+// against.
+constexpr f32 kAutoConvCutRatio = 2.5f;
+
+// Consecutive raw samples past that ratio before a cut is declared. A near
+// statistic sensitive enough to be useful will legitimately halve when an
+// object enters one patch, so one sample is not a cut -- but snapshots land at
+// <=30Hz and the readback already trails the GPU, so every confirmation is real
+// time spent at the wrong convergence. Two rejects a single-snapshot spike
+// without adding a visible stall.
+constexpr int kAutoConvCutFrames = 2;
+
+// Snap target: median of the last few RAW samples. Not the full median window,
+// which at the moment a cut is confirmed still holds mostly pre-cut values and
+// would carry the jump only part of the way; not a single raw sample either,
+// which would put the whole shot at the mercy of one frame.
+constexpr int kAutoConvCutMedianWindow = 3;
+
 // Absolute floor on the auto pull-in, in world units, combined with a
 // near-plane-derived one. One convergence slider step.
 constexpr f32 kAutoConvMinConvergence = 25.0f;
@@ -206,6 +234,9 @@ int s_autoconv_history_pos = 0;
 
 // Smoothed nearest-object depth in world units. <= 0 means "no estimate yet".
 f32 s_autoconv_z_ema = 0.0f;
+
+// Consecutive raw samples that have cleared kAutoConvCutRatio on approach.
+int s_autoconv_cut_run = 0;
 
 // Smoothed 1/convergence. See auto_convergence_tick for why the smoothing runs
 // in reciprocal space HERE but not in closeup_scale_tick.
@@ -274,10 +305,28 @@ f32 z24_to_view_depth(u32 z24, f32 nearZ, f32 farZ) {
     return nearZ * farZ / denom;
 }
 
+// Median of the most recent `count` raw nearest-depth samples. s_autoconv_-
+// history_pos points at the NEXT write slot, so the newest sample is behind it.
+f32 recent_raw_median(int count) {
+    count = std::min(count, s_autoconv_history_count);
+    if (count <= 0) {
+        return 0.0f;
+    }
+    std::array<f32, kAutoConvMedianWindow> recent{};
+    for (int i = 0; i < count; ++i) {
+        const int idx =
+            (s_autoconv_history_pos - 1 - i + 2 * kAutoConvMedianWindow) % kAutoConvMedianWindow;
+        recent[i] = s_autoconv_history[idx];
+    }
+    std::sort(recent.begin(), recent.begin() + count);
+    return recent[count / 2];
+}
+
 void auto_convergence_reset() {
     s_autoconv_history_count = 0;
     s_autoconv_history_pos = 0;
     s_autoconv_z_ema = 0.0f;
+    s_autoconv_cut_run = 0;
     s_autoconv_inv_convergence = 0.0f;
     s_autoconv_convergence = 0.0f;
     s_autoconv_engaged = false;
@@ -796,8 +845,49 @@ void auto_convergence_tick() {
                 std::sort(sorted.begin(), sorted.begin() + s_autoconv_history_count);
                 const f32 zMedian = sorted[s_autoconv_history_count / 2];
 
+                // Camera-cut test, on the RAW sample rather than the median:
+                // a 5-wide median needs three snapshots before it even starts
+                // to cross a step, and that latency is exactly what the smooth
+                // path wants and the cut path must not pay. The persistence
+                // counter is what rejects spikes here instead.
+                //
+                // APPROACH ONLY. Making the test symmetric is the obvious next
+                // step once the ratio replaces a relative difference, and it
+                // buys a worse failure than it cures: anything held close to
+                // the camera and moving -- an item-get pose, Midna leaning out,
+                // a bug circling in Hyrule Field -- swings the near statistic
+                // past 2.5x in BOTH directions within a second or two, and a
+                // symmetric detector answers every crossing with a hard snap
+                // and a smoother reset: in, out, in. That thrashing alarms a
+                // viewer far more than the sluggish convergence it replaced.
+                // Recession has nothing to protect against anyway -- convergence
+                // sitting nearer than the scene needs costs only positive
+                // parallax, which separation already bounds -- so it belongs on
+                // the EMA's slow path. Dropping the recede half also breaks the
+                // oscillation outright: after an approach snap the EMA is
+                // already at the near value, so the return trip cannot clear
+                // the ratio a second time.
+                const f32 approachRatio =
+                    (s_autoconv_z_ema > 0.0f && zRaw > 0.0f && zRaw < s_autoconv_z_ema)
+                        ? (s_autoconv_z_ema / zRaw)
+                        : 1.0f;
+                if (approachRatio > kAutoConvCutRatio) {
+                    ++s_autoconv_cut_run;
+                } else {
+                    s_autoconv_cut_run = 0;
+                }
+
                 if (s_autoconv_z_ema <= 0.0f) {
                     s_autoconv_z_ema = zMedian;
+                } else if (s_autoconv_cut_run >= kAutoConvCutFrames) {
+                    // Confirmed cut: jump the belief AND the picture in the
+                    // same pass. Zeroing the reciprocal smoother re-seeds it
+                    // from this frame's target below rather than easing across
+                    // the step we just jumped -- one synchronized snap, not an
+                    // instant EMA racing a lagging smoother.
+                    s_autoconv_z_ema = recent_raw_median(kAutoConvCutMedianWindow);
+                    s_autoconv_inv_convergence = 0.0f;
+                    s_autoconv_cut_run = 0;
                 } else {
                     const f32 rel = std::abs(zMedian - s_autoconv_z_ema) / s_autoconv_z_ema;
                     if (rel > kAutoConvDeadband) {
@@ -860,12 +950,30 @@ void auto_convergence_tick() {
     // fine and is what a control loop looks like: one filter on the input, one
     // on the output, composing into a single response. That is a different
     // thing from two independent smoothers racing on the same output.
-    const f32 smoothing =
+    //
+    // Asymmetric in/out, for the same perceptual reason kAutoConvEmaNear and
+    // kAutoConvEmaFar are, and not redundant with them: that pair governs how
+    // fast the loop BELIEVES the scene changed, this one governs how fast the
+    // picture follows that belief. A LARGER reciprocal is a NEARER convergence,
+    // so that is the direction that protects comfort and should be prompt;
+    // easing back out has nothing to protect against and reads as the image
+    // drifting if it hurries.
+    //
+    // The slider is the pull-in rate -- the direction the user is actually
+    // tuning when they ask for a faster or calmer response -- and release runs
+    // at a fixed fraction of it, so their setting keeps its meaning where it
+    // matters and the return trip is calm at every position of the slider.
+    const f32 pullInRate =
         std::clamp(getSettings().game.stereoAutoConvSmoothing.getValue(), 0.005f, 0.5f);
     const f32 targetInv = 1.0f / convTarget;
     if (s_autoconv_inv_convergence <= 0.0f) {
+        // First estimate, or a cut snap just zeroed this: adopt the target
+        // outright instead of easing up to it from nothing.
         s_autoconv_inv_convergence = targetInv;
     } else {
+        const f32 smoothing = (targetInv > s_autoconv_inv_convergence)
+                                  ? pullInRate
+                                  : pullInRate * kAutoConvReleaseRatio;
         s_autoconv_inv_convergence += (targetInv - s_autoconv_inv_convergence) * smoothing;
     }
     if (!(s_autoconv_inv_convergence > 0.0f)) {

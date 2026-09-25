@@ -41,26 +41,26 @@ UserSettings g_userSettings = {
         // Quality of Life
         .enableQuickTransform {"game.enableQuickTransform", false},
         .hideTvSettingsScreen {"game.hideTvSettingsScreen", true},
-        .biggerWallets {"game.biggerWallets", false},
+        .biggerWallets {"game.biggerWallets", true},
         .noReturnRupees {"game.noReturnRupees", false},
-        .disableRupeeCutscenes {"game.disableRupeeCutscenes", false},
-        .fastTransitions {"game.fastTransitions", false},
+        .disableRupeeCutscenes {"game.disableRupeeCutscenes", true},
+        .fastTransitions {"game.fastTransitions", true},
         .noSwordRecoil {"game.noSwordRecoil", false},
         .damageMultiplier {"game.damageMultiplier", 1},
         .noHeartDrops {"game.noHeartDrops", false},
         .instantDeath {"game.instantDeath", false},
-        .fastClimbing {"game.fastClimbing", false},
-        .noMissClimbing {"game.noMissClimbing", false},
-        .fastTears {"game.fastTears", false},
-        .no2ndFishForCat {"game.no2ndFishForCat", false},
+        .fastClimbing {"game.fastClimbing", true},
+        .noMissClimbing {"game.noMissClimbing", true},
+        .fastTears {"game.fastTears", true},
+        .no2ndFishForCat {"game.no2ndFishForCat", true},
         .buttonFishing {"game.buttonFishing", false},
-        .instantSaves {"game.instantSaves", false},
+        .instantSaves {"game.instantSaves", true},
         .instantText {"game.instantText", false},
         .holdToMash {"game.holdToMash", false},
         .sunsSong {"game.sunsSong", false},
-        .autoSave {"game.autoSave", false},
-        .enhancedMapMenus {"game.enhancedMapMenus", false},
-        .aimingReticle {"game.aimingReticle", false},
+        .autoSave {"game.autoSave", true},
+        .enhancedMapMenus {"game.enhancedMapMenus", true},
+        .aimingReticle {"game.aimingReticle", true},
 
         // Preferences
         .enableMirrorMode {"game.enableMirrorMode", false},
@@ -77,7 +77,7 @@ UserSettings g_userSettings = {
         .bloomMode {"game.bloomMode", BloomMode::Dusk},
         .bloomMultiplier {"game.bloomMultiplier", 1.0f},
         .depthOfFieldMode{"game.depthOfFieldMode", DepthOfFieldMode::Dusk},
-        .disableWaterRefraction {"game.disableWaterRefraction", false},
+        .disableWaterRefraction {"game.disableWaterRefraction", true},
         .enableTextureReplacements {"game.enableTextureReplacements", true},
         .enableFrameInterpolation {"game.enableFrameInterpolation", FrameInterpMode::Off},
         .internalResolutionScale {"game.internalResolutionScale", 0},
@@ -88,6 +88,37 @@ UserSettings g_userSettings = {
         .disableLetterboxing {"game.disableLetterboxing", LetterboxMode::Off},
         .enableHighQualityMinimapTextures {"game.enableHighQualityMinimapTextures", true},
 
+        .stereoMode {"game.stereoMode", StereoMode::Off},
+        // TP world is roughly centimeters (Link is ~200 units tall), so a
+        // human-realistic 6.5cm IPD is ~6.5 game units. Convergence in cm
+        // matches viewing distance; ~5000 units (~50m) fits outdoor scenes.
+        // 0.05 = 5% of screen width of background disparity. This is also
+        // (to within 3%) the exact clip-space equivalent of the old world-unit
+        // defaults -- 30 units at 300 convergence, 60 deg Fovy, 16:9 -- so the
+        // background depth a returning user sees is unchanged. Note the
+        // convergence default below moved at the same time and does NOT affect
+        // that: under clip space convergence only moves what sits in front of
+        // the screen plane.
+        .stereoSeparation {"game.stereoSeparation", 0.05f},
+        .stereoEyeSeparation {"game.stereoEyeSeparation", 30.0f},
+        // 150 world units (~1.5m). Puts the screen plane closer than the old
+        // 300 default, so more of the scene sits behind the screen and less of
+        // it pops forward -- a comfort-forward starting point that also leaves
+        // auto-convergence below less to do.
+        .stereoConvergence {"game.stereoConvergence", 150.0f},
+        // Positive = HUD behind the screen plane. 5 = 0.5% of screen width
+        // per eye. NOTE the sign convention flipped when this default changed:
+        // an existing profile carrying the old negative value will read as
+        // "in front of the screen" until the user re-picks it.
+        .stereoHudDepth {"game.stereoHudDepth", 5.0f},
+        .stereoFpSeparationScale {"game.stereoFpSeparationScale", 0.10f},
+        .stereoRefractionScale {"game.stereoRefractionScale", 0.30f},
+        .stereoGhostContrast {"game.stereoGhostContrast", 1.0f},
+        .stereoGhostBlackFloor {"game.stereoGhostBlackFloor", 0.0f},
+        .stereoAutoConvergence {"game.stereoAutoConvergence", true},
+        // 3% of screen width of pop-out for the nearest object. At the default
+        // 5% separation that puts it at ~62% of the convergence distance.
+        .stereoAutoConvTarget {"game.stereoAutoConvTarget", 0.03f},
         // Audio
         .noLowHpSound {"game.noLowHpSound", false},
         .midnasLamentNonStop {"game.midnasLamentNonStop", false},
@@ -325,6 +356,17 @@ void registerSettings() {
     Register(g_userSettings.game.disableCutscenePillarboxing);
     Register(g_userSettings.game.disableLetterboxing);
     Register(g_userSettings.game.enableHighQualityMinimapTextures);
+    Register(g_userSettings.game.stereoMode);
+    Register(g_userSettings.game.stereoSeparation);
+    Register(g_userSettings.game.stereoEyeSeparation);
+    Register(g_userSettings.game.stereoConvergence);
+    Register(g_userSettings.game.stereoHudDepth);
+    Register(g_userSettings.game.stereoFpSeparationScale);
+    Register(g_userSettings.game.stereoRefractionScale);
+    Register(g_userSettings.game.stereoGhostContrast);
+    Register(g_userSettings.game.stereoGhostBlackFloor);
+    Register(g_userSettings.game.stereoAutoConvergence);
+    Register(g_userSettings.game.stereoAutoConvTarget);
     Register(g_userSettings.game.enableFastIronBoots);
     Register(g_userSettings.game.canTransformAnywhere);
     Register(g_userSettings.game.fastRoll);

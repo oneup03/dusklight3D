@@ -48,6 +48,15 @@ enum class GraphicsOption {
     BloomMultiplier,
     DepthOfFieldMode,
     TextureReplacements,
+    StereoMode,
+    StereoSeparation,
+    StereoConvergence,
+    StereoHudDepth,
+    StereoFpSeparationScale,
+    StereoRefractionScale,
+    StereoGhostContrast,
+    StereoGhostBlackFloor,
+    StereoAutoConvTarget,
 };
 
 struct GraphicsSetting {

@@ -61,6 +61,7 @@
 #include "dusk/presentation.hpp"
 #include "dusk/settings.h"
 #include "dusk/speedrun.h"
+#include "dusk/stereo.h"
 #include "dusk/texture_replacements.hpp"
 #include "dusk/time.h"
 #include "dusk/ui/command_console.hpp"
@@ -730,6 +731,11 @@ int game_main(int argc, char* argv[]) {
     }
     dusk::applyInternalResolutionScale(dusk::getSettings().game.internalResolutionScale.getValue());
     dusk::applyResampler(dusk::getSettings().game.resampler.getValue());
+    // Convert a profile saved under the old world-unit eye-separation form to
+    // clip space. No-op on a fresh profile or an already-converted one, and
+    // must run before the first apply_config_from_settings().
+    dusk::stereo::migrate_legacy_config();
+    dusk::stereo::apply_config_from_settings();
 
     dusk::audio::SetMasterVolume(dusk::audio::MasterVolumeToLinear(dusk::getSettings().audio.masterVolume / 100.0f));
     dusk::audio::SetEnableReverb(dusk::getSettings().audio.enableReverb);

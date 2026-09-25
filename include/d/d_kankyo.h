@@ -1045,6 +1045,14 @@ void dKy_Sound_init();
 void dKy_setLight_nowroom(char room_no);
 void dKy_setLight_nowroom_actor(dKy_tevstr_c* tevstr_p);
 void dKy_setLight_again();
+
+#if TARGET_PC
+// Stereo replays the whole painter once per eye; these bracket that loop so
+// both eyes start from identical global light state. See the definitions in
+// d_kankyo.cpp for why that is not automatic.
+void dKy_stereo_saveLightBaseline();
+void dKy_stereo_restoreLightBaseline();
+#endif
 void dKy_GxFog_tevstr_set(dKy_tevstr_c* tevstr_p);
 void dKy_plight_set(LIGHT_INFLUENCE* light_inf_p);
 void dKy_plight_priority_set(LIGHT_INFLUENCE* light_inf_p);

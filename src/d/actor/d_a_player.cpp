@@ -14,6 +14,9 @@
 #include "d/actor/d_a_boomerang.h"
 #include "d/actor/d_a_midna.h"
 #include "d/actor/d_a_spinner.h"
+#if TARGET_PC
+#include "dusk/stereo.h"
+#endif
 
 #if TARGET_PC
 #include "dusk/interp/samples.h"
@@ -417,7 +420,22 @@ void daPy_sightPacket_c::draw() {
     GXInitTexObjLOD(&texObj, GX_LINEAR, GX_LINEAR, 0.0, 0.0, 0.0, GX_FALSE, GX_FALSE, GX_ANISO_1);
     GXLoadTexObj(&texObj, GX_TEXMAP0);
 #endif
+#if TARGET_PC
+    // mProjMtx was built in setSight() using the unshifted center projection
+    // (setSight runs from the player draw in fpcDw_Handler, BEFORE the per-eye
+    // painter loop in cAPIGph_Painter). Add the per-eye parallax for mPos's
+    // world depth so the reticle plants on the aimed surface instead of
+    // floating at screen depth. Also re-add hud_ortho_shift_x() to cancel
+    // the J2D ortho's HUD-depth shift that would otherwise drag the reticle
+    // off-target.
+    Mtx adjustedProjMtx;
+    mDoMtx_copy(mProjMtx, adjustedProjMtx);
+    adjustedProjMtx[0][3] += dusk::stereo::screen_parallax_x_for_world_pos(mPos);
+    adjustedProjMtx[0][3] += dusk::stereo::hud_ortho_shift_x();
+    GXLoadPosMtxImm(adjustedProjMtx, GX_PNMTX0);
+#else
     GXLoadPosMtxImm(mProjMtx, GX_PNMTX0);
+#endif
     GXSetCurrentMtx(0);
     GXSetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR_NULL);
 #if TARGET_PC
@@ -452,6 +470,10 @@ void daPy_sightPacket_c::draw() {
 
 void daPy_sightPacket_c::setSight(IF_DUSK(bool registerPacket)) {
     Vec proj;
+    // proj.x/y come from the unshifted center projection because setSight runs
+    // from the player's actor draw, which fires in fpcDw_Handler BEFORE the
+    // per-eye painter loop. The per-eye depth correction + HUD-shift counter
+    // is applied later inside draw() (which IS per-eye via the 2D-XLU drain).
     mDoLib_project(&mPos, &proj);
 #if TARGET_PC
     auto& positions = dusk::interp::get<dusk::interp::Samples<cXyz>>(this);

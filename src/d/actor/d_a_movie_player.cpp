@@ -27,6 +27,9 @@
 #include "dusk/os.h"
 #include "helpers/gx_helper.h"
 
+#include "dusk/stereo.h"
+#include <aurora/aurora.h>
+
 #include "JSystem/JAudio2/JASCriticalSection.h"
 
 // idk what OS_THREAD_ATTR_DETACH does, and it stops OSThreadJoin()
@@ -4266,7 +4269,17 @@ static void daMP_ActivePlayer_Draw() {
         daMP_videoInfo.xSize,
         daMP_videoInfo.ySize);
 #endif
+#if TARGET_PC
+    // In stereo mode, the painter runs once per eye. DrawDone frees the YUV
+    // texture buffers, so calling it after the left-eye draw leaves the
+    // right-eye draw with nothing to display. Defer the release until the
+    // right-eye pass completes.
+    if (!dusk::stereo::active() || aurora_get_active_eye() == AURORA_EYE_RIGHT) {
+        daMP_THPPlayerDrawDone();
+    }
+#else
     daMP_THPPlayerDrawDone();
+#endif
 
     if (!fopOvlpM_IsPeek() && frame > 0 && (cAPICPad_ANY_BUTTON(0) || !daMP_c::daMP_c_Get_MovieRestFrame())) {
         dComIfGp_event_reset();

@@ -37,6 +37,7 @@ compile_commands.json
 # Miscellaneous
 *.exe
 *.zip
+TPHD-3D/
 
 # MacOS
 .DS_Store
@@ -53,3 +54,9 @@ compile_commands.json
 pipeline_cache.bin
 
 extract
+# RenderDoc captures (hundreds of MB each)
+*.rdc
+renderdoc/
+
+# Claude Code local tooling config
+.claude/

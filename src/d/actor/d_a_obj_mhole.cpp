@@ -9,6 +9,7 @@
 #include "d/d_cc_d.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_debug_viewer.h"
+#include "dusk/stereo.h"
 #include "m_Do/m_Do_graphic.h"
 
 static u32 const l_bmd[2] = {5, 5};
@@ -306,6 +307,33 @@ int daObjMHole_c::draw() {
 
     dComIfGd_setListFilter();
     J3DModelData* modelData = mpModel->getModelData();
+
+#ifdef TARGET_PC
+    // Stereo 3D: hide the two screen-space refraction shapes (materials 0/1,
+    // mat_01mgnInside / mat_02mgnOutside). Their VIEWPROJMAP texgen samples
+    // the per-eye scene capture at screen-space UVs, which cannot currently
+    // be made depth-correct on a stereo display -- the refracted content
+    // fights the surface depth and reads as a floating sheet. The animated
+    // noise/glow layers (materials 2/3) still draw, so the field stays
+    // clearly visible at the correct depth. Mono keeps the full effect.
+    // Packet flags are per model instance; re-asserted every frame so
+    // toggling the stereo mode mid-game takes effect immediately.
+    const bool hide_refraction = dusk::stereo::active();
+    for (u16 i = 0; i < 2 && i < modelData->getMaterialNum(); i++) {
+        J3DShape* shape = modelData->getMaterialNodePointer(i)->getShape();
+        if (shape != NULL) {
+            J3DShapePacket* shape_packet = mpModel->getShapePacket(shape->getIndex());
+            if (shape_packet != NULL) {
+                if (hide_refraction) {
+                    shape_packet->onFlag(J3DShpFlag_Hidden);
+                } else {
+                    shape_packet->offFlag(J3DShpFlag_Hidden);
+                }
+            }
+        }
+    }
+#endif
+
     for (u16 i = 0; i < modelData->getMaterialNum(); i++) {
         if (i == 0 || i == 1) {
             J3DMaterial* material = modelData->getMaterialNodePointer(i);

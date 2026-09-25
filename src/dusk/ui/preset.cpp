@@ -22,6 +22,22 @@ void applyPresetClassic() {
     s.game.hideTvSettingsScreen.setValue(false);
     s.game.menuScalingMode.setValue(MenuScaling::GameCube);
     s.game.enableMenuPointer.setValue(false);
+    // The quality-of-life flags default to ON now, and every one of them is a
+    // deviation from the retail game, so Classic has to turn them back off
+    // rather than inherit them. Keep this list in step with the defaults in
+    // settings.cpp: anything that ships on by default and isn't in the original
+    // game belongs here.
+    s.game.biggerWallets.setValue(false);
+    s.game.disableRupeeCutscenes.setValue(false);
+    s.game.fastTransitions.setValue(false);
+    s.game.fastClimbing.setValue(false);
+    s.game.fastTears.setValue(false);
+    s.game.autoSave.setValue(false);
+    s.game.instantSaves.setValue(false);
+    s.game.noMissClimbing.setValue(false);
+    s.game.aimingReticle.setValue(false);
+    s.game.no2ndFishForCat.setValue(false);
+    s.game.enhancedMapMenus.setValue(false);
     AuroraSetViewportPolicy(AURORA_VIEWPORT_FIT);
 }
 
@@ -54,6 +70,8 @@ void applyPresetDusk() {
     s.game.autoSave.setValue(true);
     s.game.menuScalingMode.setValue(MenuScaling::Dusklight);
     s.game.enhancedMapMenus.setValue(true);
+    s.game.fastTransitions.setValue(true);
+    s.game.aimingReticle.setValue(true);
     s.game.enableMenuPointer.setValue(true);
 }
 

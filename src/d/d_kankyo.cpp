@@ -37,6 +37,7 @@
 #include "dusk/game_clock.h"
 #include "dusk/interp/material.h"
 #include "dusk/imgui/ImGuiBloomWindow.hpp"
+#include "dusk/stereo.h"
 static f32 timeScale = 1.0f;
 #endif
 
@@ -120,6 +121,38 @@ static LightStatus lightStatusData[8];
 static u16 lightMask = 0x0001;
 
 static LightStatus* lightStatusPt = lightStatusData;
+
+#if TARGET_PC
+// Stereo runs the whole painter once per eye, but the once-per-frame light
+// setup that establishes the baseline -- dKy_setLight_nowroom at ratio 1.0 --
+// runs OUTSIDE that loop. Meanwhile lightStatusData and lightMask are global
+// mutable state that draw-time code rewrites mid-pass: notably
+// dKy_setLight_nowroom_grass, which scales the global sun/moon slots (2 and 3)
+// by the stage's GRASSLIGHT/100 for the grass it is about to draw and never
+// restores them.
+//
+// So the first eye sees the unscaled baseline and the second inherits whatever
+// the first eye's pass left behind. Everything lit by the global slots -- about
+// half the scene -- then renders dimmer in one eye than the other, which fuses
+// as a flat, wrong-looking surface rather than as depth.
+//
+// Snapshot before the eye loop and restore at the top of each eye, so both
+// replay the same command stream from the same light state. Restoring only the
+// CPU-side array is enough: every consumer reaches GX through a
+// dKy_GlobalLight_set upload that re-reads it.
+static LightStatus lightStatusBaseline[8];
+static u16 lightMaskBaseline = 0x0001;
+
+void dKy_stereo_saveLightBaseline() {
+    memcpy(lightStatusBaseline, lightStatusData, sizeof(lightStatusData));
+    lightMaskBaseline = lightMask;
+}
+
+void dKy_stereo_restoreLightBaseline() {
+    memcpy(lightStatusData, lightStatusBaseline, sizeof(lightStatusData));
+    lightMask = lightMaskBaseline;
+}
+#endif
 
 void dKy_WolfPowerup_AmbCol(GXColorS10* in_col_p) {
     JUT_ASSERT(185, in_col_p != NULL);
@@ -3113,12 +3146,17 @@ void dScnKy_env_light_c::settingTevStruct_colget_actor(cXyz* unused, dKy_tevstr_
     if (tevstr_p->YukaCol != 0xFF) {
         f32 target = tevstr_p->YukaCol / 100.0f;
 
-        if (g_env_light.mActorLightEffect == 100) {
+        // field_0x374 scales the GX light colours below, and this is the draw
+        // phase -- which stereo runs once per eye. Advance it on one eye only so
+        // both eyes light the object identically. See should_advance_draw_state.
+        if (g_env_light.mActorLightEffect == 100 &&
+            DUSK_IF_ELSE(dusk::stereo::should_advance_draw_state(), true)) {
             cLib_addCalc(&tevstr_p->field_0x374, target, 0.25f, 0.05f, 0.000001f);
         }
     } else if (tevstr_p->room_no >= 0) {
         tevstr_p->UseCol = tevstr_p->room_no;
-        if (g_env_light.mActorLightEffect == 100) {
+        if (g_env_light.mActorLightEffect == 100 &&
+            DUSK_IF_ELSE(dusk::stereo::should_advance_draw_state(), true)) {
             cLib_addCalc(&tevstr_p->field_0x374, 1.0f, 0.25f, 0.05f, 0.000001f);
         }
     } else {
@@ -3169,12 +3207,17 @@ void dScnKy_env_light_c::settingTevStruct_colget_player(dKy_tevstr_c* tevstr_p) 
     if (tevstr_p->YukaCol != 0xFF) {
         f32 target = tevstr_p->YukaCol / 100.0f;
 
-        if (g_env_light.mActorLightEffect == 100) {
+        // field_0x374 scales the GX light colours below, and this is the draw
+        // phase -- which stereo runs once per eye. Advance it on one eye only so
+        // both eyes light the object identically. See should_advance_draw_state.
+        if (g_env_light.mActorLightEffect == 100 &&
+            DUSK_IF_ELSE(dusk::stereo::should_advance_draw_state(), true)) {
             cLib_addCalc(&tevstr_p->field_0x374, target, 0.25f, 0.05f, 0.000001f);
         }
     } else if (tevstr_p->room_no >= 0) {
         tevstr_p->UseCol = tevstr_p->room_no;
-        if (g_env_light.mActorLightEffect == 100) {
+        if (g_env_light.mActorLightEffect == 100 &&
+            DUSK_IF_ELSE(dusk::stereo::should_advance_draw_state(), true)) {
             cLib_addCalc(&tevstr_p->field_0x374, 1.0f, 0.25f, 0.05f, 0.000001f);
         }
     }
@@ -3431,7 +3474,9 @@ void dScnKy_env_light_c::settingTevStruct_plightcol_plus(cXyz* pos_p, dKy_tevstr
 
                     f32 sp24 = cM_ssin(g_Counter.mCounter0 * 325);
                     f32 sp20 = cM_scos(g_Counter.mCounter0 * 285);
-                    cLib_addCalcU8(&light_info->mColor.a, fabsf(sp24 * 255.0f), 2, 255);
+                    if (DUSK_IF_ELSE(dusk::stereo::should_advance_draw_state(), true)) {
+                        cLib_addCalcU8(&light_info->mColor.a, fabsf(sp24 * 255.0f), 2, 255);
+                    }
                     light_info->mColor.a *= sp34;
 
                     light_pos.y += sp20 * 500.0f;
@@ -3509,7 +3554,15 @@ void dScnKy_env_light_c::settingTevStruct_plightcol_plus(cXyz* pos_p, dKy_tevstr
             light_info->mColor.r = field_0x10f0.r;
             light_info->mColor.g = field_0x10f0.g;
             light_info->mColor.b = field_0x10f0.b;
-        } else {
+        } else if (DUSK_IF_ELSE(dusk::stereo::should_advance_draw_state(), true)) {
+            // This is the draw phase, which stereo runs once per eye, and these
+            // three are an accumulator feeding a loop: the colour advances
+            // toward field_0x10f0, then field_0x10f0 is recomputed from the
+            // colour just below. Stepped twice per frame the loop settles into
+            // a steady state whose consecutive steps DIFFER, so each eye lit
+            // the whole scene from a different point on it -- a stable, global,
+            // per-eye brightness mismatch. Advance on one eye; the other reuses
+            // the value, since mColor is persistent state and not recomputed.
             cLib_addCalcU8(&light_info->mColor.r, field_0x10f0.r, 10, 0x80);
             cLib_addCalcU8(&light_info->mColor.g, field_0x10f0.g, 10, 0x80);
             cLib_addCalcU8(&light_info->mColor.b, field_0x10f0.b, 10, 0x80);
@@ -8478,7 +8531,18 @@ void dKy_setLight_nowroom_common(char room_no, f32 light_ratio) {
         }
 
         if (camera != 0) {
+#if TARGET_PC
+            // Pick the influencing light from the CENTRE camera, not this eye's.
+            // This is a nearest-light tie-break: between two sources -- the
+            // Ordon/Faron bridge being the reported case -- the eyes' half-
+            // separation of lateral offset is enough to hand them different
+            // winners, and the scene is then lit differently in each eye. The
+            // shift exists for parallax, which is continuous; a discrete pick
+            // has to be made once for the frame.
+            eflight_id = dKy_eflight_influence_id(dusk::stereo::center_camera_eye(0), 0);
+#else
             eflight_id = dKy_eflight_influence_id(camera->view.lookat.eye, 0);
+#endif
             if (eflight_id >= 0) {
                 dKy_bgparts_activelight_set(g_env_light.efplight[eflight_id], 1);
                 if (dKy_Indoor_check() == TRUE) {

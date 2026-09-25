@@ -917,6 +917,118 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                     "<br/>Disable the top and bottom black bars during L-targeting, aiming, "
                     "cutscenes, dialogue, etc.");
             });
+
+        leftPane.add_section("Stereoscopic 3D");
+        graphics_tuner_control(*this, leftPane, rightPane,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoMode,
+                .title = "Stereo Mode",
+                .helpText = "Render the scene twice per frame and combine the eyes for stereoscopic"
+                            " 3D output. Side-by-Side and Top-and-Bottom are for compatible 3D"
+                            " displays; Anaglyph is for red/cyan glasses; Interlaced and"
+                            " Checkerboard suit passive 3D monitors. The in-game UI is not"
+                            " stereo-aware.",
+            });
+        graphics_tuner_control(*this, leftPane, rightPane,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoSeparation,
+                .title = "Separation",
+                .helpText = "Strength of the 3D effect, measured as how far apart the two eyes'"
+                            " copies of a distant object sit, as a percentage of screen width."
+                            " This stays constant no matter how the game's camera zooms. Above"
+                            " roughly 10% your eyes have to turn outward to fuse the image on a"
+                            " typical 27-inch screen, which cannot be done comfortably; on a"
+                            " larger screen the comfortable limit is lower. Default 5.0%.",
+            });
+        graphics_tuner_control(*this, leftPane, rightPane,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoConvergence,
+                .title = "Convergence",
+                .helpText = "Distance at which objects appear flush with the screen, in world"
+                            " units. Each step is 25 units (~25cm). Lower values push more of"
+                            " the scene behind the screen; higher values bring more of it out in"
+                            " front. It no longer changes how deep the background looks -- that"
+                            " is Separation's job -- so raising it now spends more of your total"
+                            " depth budget rather than less.",
+            });
+        graphics_tuner_control(*this, leftPane, rightPane,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoHudDepth,
+                .title = "HUD Depth",
+                .helpText = "Push the HUD behind (positive) or in front of (negative) the screen"
+                            " plane. 0 keeps the HUD flat on the screen. Each step is ~0.1% of"
+                            " screen width per eye. Default 5.",
+            });
+        graphics_tuner_control(*this, leftPane, rightPane,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoFpSeparationScale,
+                .title = "Close-Up Convergence Scale",
+                .helpText = "IGNORED while Auto Convergence is on, which does the same job from"
+                            " the depth buffer and at the subject's actual distance. Turn Auto"
+                            " Convergence off to use this instead. It pulls Convergence in by this"
+                            " much when a close-up subject dominates the frame: first-person aim"
+                            " modes (bow, slingshot, clawshot, dominion rod) and any open"
+                            " dialog/message box. Your Convergence setting is always the ceiling"
+                            " -- this only ever pulls closer. Default 10%.",
+            });
+        graphics_tuner_control(*this, leftPane, rightPane,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoRefractionScale,
+                .title = "Refraction Strength",
+                .helpText = "Scales the amplitude of particle refraction (heat haze, fire shimmer,"
+                            " water distortion) when 3D is active. Screen-space refraction can"
+                            " cause eye strain in stereo because the haze appears at one depth but"
+                            " shows pixels from varying depths behind it. Lower values soften the"
+                            " effect; 0% removes it entirely. Mono rendering is not affected."
+                            " Default 30%.",
+            });
+        graphics_tuner_control(*this, leftPane, rightPane,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoGhostContrast,
+                .title = "Ghost Reduction: Contrast",
+                .helpText = "Reduces ghosting -- a faint copy of one eye's image bleeding into the"
+                            " other -- by squeezing the picture's contrast toward mid grey before"
+                            " it reaches the display. How visible a leak is depends on the"
+                            " brightness difference between the eyes, so shrinking that difference"
+                            " shrinks the ghost. Costs contrast across the whole image. Try 90%"
+                            " first and go lower only if edges still ghost. Off leaves the image"
+                            " untouched.",
+            });
+        graphics_tuner_control(*this, leftPane, rightPane,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoGhostBlackFloor,
+                .title = "Ghost Reduction: Black Floor",
+                .helpText = "Raises the darkest black the image can reach, leaving white alone."
+                            " Displays that cancel crosstalk themselves -- LeiaSR and other"
+                            " autostereo panels -- subtract part of the opposite eye, which drives"
+                            " dark pixels below black where they get clipped, and the clipped part"
+                            " is what you see as a ghost. This gives that subtraction room to"
+                            " work. 2-5% is usually enough; blacks turn grey quickly above that."
+                            " Has no effect on displays that don't cancel, such as anaglyph"
+                            " glasses or passive 3D monitors -- use Contrast there instead.",
+            });
+        config_bool_select(leftPane, rightPane, getSettings().game.stereoAutoConvergence,
+            {
+                .key = "Auto Convergence",
+                .helpText = "Watch the depth buffer and automatically bring the screen plane"
+                            " closer when something near fills the view, so it never pops"
+                            " uncomfortably far out of the screen. Your Convergence setting stays"
+                            " the limit -- this only ever pulls closer, never further. Background"
+                            " depth is unaffected. It cuts in quickly when something approaches"
+                            " and eases back out slowly, and snaps outright on a hard cut to a"
+                            " close shot. Supersedes Close-Up Convergence Scale, which stands"
+                            " down while this is on so only one thing moves the screen plane."
+            });
+        graphics_tuner_control(*this, leftPane, rightPane,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoAutoConvTarget,
+                .title = "Auto Convergence Limit",
+                .helpText = "How far the nearest object is allowed to pop out of the screen before"
+                            " Auto Convergence pulls the screen plane in, measured the same way as"
+                            " Separation: a percentage of screen width. Lower is more cautious and"
+                            " keeps the screen plane closer to you; higher allows more pop-out."
+                            " Only used when Auto Convergence is on. Default 3.0%.",
+            });
     });
 
     add_tab("Input", [this](Rml::Element* content) {

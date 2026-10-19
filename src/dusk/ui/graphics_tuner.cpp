@@ -136,6 +136,26 @@ Rml::String format_ghost_black_floor(int value) {
     return value <= 0 ? "Off" : fmt::format("{}%", value);
 }
 
+Rml::String format_sr_crosstalk_mode(int value) {
+    switch (static_cast<StereoSrCrosstalkMode>(value)) {
+    case StereoSrCrosstalkMode::Default:
+        return "Display Default";
+    case StereoSrCrosstalkMode::Off:
+        return "Off";
+    case StereoSrCrosstalkMode::Static:
+        return "Static";
+    case StereoSrCrosstalkMode::Dynamic:
+        return "Dynamic";
+    default:
+        return "";
+    }
+}
+
+// Both are multiples of the panel's own value, so 100% is the display as shipped.
+Rml::String format_sr_strength(int value) { return fmt::format("{}%", value * 5); }
+
+Rml::String format_sr_weave_contrast(int value) { return fmt::format("{}%", value); }
+
 template <typename T>
 int read_cvar(const ConfigVar<T>& var) {
     if constexpr (std::is_same_v<T, float>) {
@@ -289,6 +309,19 @@ const GraphicsSetting& GraphicsSetting::of(GraphicsOption option) {
     case GraphicsOption::StereoGhostBlackFloor:
         return bind_stereo<[]() -> auto& { return getSettings().game.stereoGhostBlackFloor; },
             100>(0, 10, 0, format_ghost_black_floor);
+    case GraphicsOption::StereoSrCrosstalkMode:
+        return bind_stereo<[]() -> auto& { return getSettings().game.stereoSrCrosstalkMode; }>(
+            static_cast<int>(StereoSrCrosstalkMode::Default),
+            static_cast<int>(StereoSrCrosstalkMode::Dynamic),
+            static_cast<int>(StereoSrCrosstalkMode::Default), format_sr_crosstalk_mode);
+    case GraphicsOption::StereoSrCrosstalkStrength:
+        // 0..3x the panel's own factors, one click = 5%.
+        return bind_stereo<[]() -> auto& { return getSettings().game.stereoSrCrosstalkStrength; },
+            20>(0, 60, 20, format_sr_strength);
+    case GraphicsOption::StereoSrWeaveContrast:
+        // 0.5..1.0x the panel's own; above 1.0 is not useful.
+        return bind_stereo<[]() -> auto& { return getSettings().game.stereoSrWeaveContrast; },
+            100>(50, 100, 100, format_sr_weave_contrast);
     case GraphicsOption::StereoAutoConvTarget:
         // Same screen-width-fraction units as Separation. Read live by the
         // auto-convergence loop, so no AuroraStereoConfig push is needed.

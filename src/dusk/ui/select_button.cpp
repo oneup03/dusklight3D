@@ -96,6 +96,11 @@ bool SelectButton::handle_nav_command(NavCommand cmd) {
 }
 
 void BaseControlledSelectButton::update() {
+    if (hidden()) {
+        set_display(mRoot, Rml::Style::Display::None);
+    } else if (mRoot->GetLocalProperty(Rml::PropertyId::Display) != nullptr) {
+        mRoot->RemoveProperty(Rml::PropertyId::Display);
+    }
     set_disabled(disabled());
     set_value_label(format_value());
     set_modified(modified());
@@ -110,10 +115,17 @@ bool ControlledSelectButton::modified() const {
 }
 
 bool ControlledSelectButton::disabled() const {
+    if (hidden()) {
+        return true;
+    }
     if (mIsDisabled) {
         return mIsDisabled();
     }
     return BaseControlledSelectButton::disabled();
+}
+
+bool ControlledSelectButton::hidden() const {
+    return mIsHidden && mIsHidden();
 }
 
 Rml::String ControlledSelectButton::format_value() {

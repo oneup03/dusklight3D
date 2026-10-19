@@ -115,6 +115,9 @@ UserSettings g_userSettings = {
         .stereoRefractionScale {"game.stereoRefractionScale", 0.30f},
         .stereoGhostContrast {"game.stereoGhostContrast", 1.0f},
         .stereoGhostBlackFloor {"game.stereoGhostBlackFloor", 0.0f},
+        .stereoSrCrosstalkMode {"game.stereoSrCrosstalkMode", StereoSrCrosstalkMode::Default},
+        .stereoSrCrosstalkStrength {"game.stereoSrCrosstalkStrength", 1.0f},
+        .stereoSrWeaveContrast {"game.stereoSrWeaveContrast", 1.0f},
         .stereoAutoConvergence {"game.stereoAutoConvergence", true},
         // 3% of screen width of pop-out for the nearest object. At the default
         // 5% separation that puts it at ~62% of the convergence distance.
@@ -365,6 +368,9 @@ void registerSettings() {
     Register(g_userSettings.game.stereoRefractionScale);
     Register(g_userSettings.game.stereoGhostContrast);
     Register(g_userSettings.game.stereoGhostBlackFloor);
+    Register(g_userSettings.game.stereoSrCrosstalkMode);
+    Register(g_userSettings.game.stereoSrCrosstalkStrength);
+    Register(g_userSettings.game.stereoSrWeaveContrast);
     Register(g_userSettings.game.stereoAutoConvergence);
     Register(g_userSettings.game.stereoAutoConvTarget);
     Register(g_userSettings.game.enableFastIronBoots);

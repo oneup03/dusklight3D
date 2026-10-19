@@ -629,6 +629,17 @@ void apply_config_from_settings() {
             getSettings().game.stereoRefractionScale.getValue(), 0.0f, 1.0f),
         .ghostContrast = ghostContrast,
         .ghostBlackFloor = ghostBlackFloor,
+        // Display settings rather than part of the compose pass, so they are
+        // NOT forced to no-ops with the levers above: aurora only reads them
+        // while weaving, and only a live LeiaSR weaver can apply them anyway.
+        // Clamped to the UI's ranges so a hand-edited profile can't push the
+        // panel somewhere the tuner can't bring it back from.
+        .srCrosstalkMode = static_cast<AuroraSrCrosstalkMode>(
+            getSettings().game.stereoSrCrosstalkMode.getValue()),
+        .srCrosstalkStrength =
+            std::clamp(getSettings().game.stereoSrCrosstalkStrength.getValue(), 0.0f, 3.0f),
+        .srWeaveContrast =
+            std::clamp(getSettings().game.stereoSrWeaveContrast.getValue(), 0.5f, 1.0f),
     };
     aurora_set_stereo_config(&cfg);
 }

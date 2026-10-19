@@ -56,6 +56,9 @@ enum class GraphicsOption {
     StereoRefractionScale,
     StereoGhostContrast,
     StereoGhostBlackFloor,
+    StereoSrCrosstalkMode,
+    StereoSrCrosstalkStrength,
+    StereoSrWeaveContrast,
     StereoAutoConvTarget,
 };
 
@@ -81,6 +84,8 @@ struct GraphicsTunerProps {
     GraphicsOption option;
     Rml::String title;
     Rml::String helpText;
+    // Evaluated every frame; a hidden control is removed from the settings list.
+    std::function<bool()> isHidden;
 };
 
 class GraphicsTuner : public Document {

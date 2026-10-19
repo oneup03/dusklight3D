@@ -47,6 +47,9 @@ public:
 
 protected:
     virtual Rml::String format_value() = 0;
+    // A hidden control is removed from layout and treated as disabled, so
+    // keyboard/controller navigation skips it.
+    virtual bool hidden() const { return false; }
 };
 
 class ControlledSelectButton : public BaseControlledSelectButton {
@@ -56,6 +59,7 @@ public:
         std::function<Rml::String()> getValue;
         std::function<bool()> isDisabled;
         std::function<bool()> isModified;
+        std::function<bool()> isHidden;
         bool submit = true;
     };
 
@@ -66,17 +70,19 @@ public:
                   .submit = props.submit,
               }),
           mGetValue(std::move(props.getValue)), mIsDisabled(std::move(props.isDisabled)),
-          mIsModified(std::move(props.isModified)) {}
+          mIsModified(std::move(props.isModified)), mIsHidden(std::move(props.isHidden)) {}
 
     bool modified() const override;
     bool disabled() const override;
 
 protected:
     Rml::String format_value() override;
+    bool hidden() const override;
 
     std::function<Rml::String()> mGetValue;
     std::function<bool()> mIsDisabled;
     std::function<bool()> mIsModified;
+    std::function<bool()> mIsHidden;
 };
 
 }  // namespace dusk::ui

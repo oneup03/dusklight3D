@@ -25,6 +25,7 @@
 #include "dusk/presentation.hpp"
 #include "dusk/speedrun.h"
 
+#include <aurora/aurora.h>
 #include <aurora/gfx.h>
 #include <aurora/lib/window.hpp>
 #include <borealis/file_select.hpp>
@@ -470,6 +471,7 @@ void graphics_tuner_control(Window& window, Pane& leftPane, Pane& rightPane,
                 .key = props.title,
                 .getValue = [setting] { return setting.text(); },
                 .isModified = [setting] { return setting.isModified(); },
+                .isHidden = props.isHidden,
                 .submit = false,
             })
             .on_nav_command([&window, props](Rml::Event&, NavCommand cmd) {
@@ -1004,8 +1006,49 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                             " dark pixels below black where they get clipped, and the clipped part"
                             " is what you see as a ghost. This gives that subtraction room to"
                             " work. 2-5% is usually enough; blacks turn grey quickly above that."
+                            " On LeiaSR it works in linear light, like the panel's own"
+                            " cancellation, so 1-2% goes much further there."
                             " Has no effect on displays that don't cancel, such as anaglyph"
                             " glasses or passive 3D monitors -- use Contrast there instead.",
+            });
+        // The LeiaSR weaver's own anti-crosstalk. Shown only while a LeiaSR
+        // panel is actually weaving and its runtime exposes the controls --
+        // they mean nothing on any other display.
+        const auto hideUnlessLeiaSR = [] {
+            return getSettings().game.stereoMode.getValue() != StereoMode::LeiaSR ||
+                   !aurora_leiasr_crosstalk_available();
+        };
+        graphics_tuner_control(*this, leftPane, rightPane,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoSrCrosstalkMode,
+                .title = "LeiaSR Crosstalk Mode",
+                .helpText = "How the LeiaSR panel cancels crosstalk itself, by subtracting part of"
+                            " each eye's image from the other. Dynamic follows your tracked eye"
+                            " position; Static applies a fixed correction; Off disables it."
+                            " Display Default keeps the panel's own choice (Dynamic on current"
+                            " panels).",
+                .isHidden = hideUnlessLeiaSR,
+            });
+        graphics_tuner_control(*this, leftPane, rightPane,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoSrCrosstalkStrength,
+                .title = "LeiaSR Crosstalk Strength",
+                .helpText = "How hard the panel's own crosstalk cancellation works, as a multiple"
+                            " of the strength it was calibrated with -- 100% is the display as"
+                            " shipped. Higher removes more ghosting but clips more in dark areas;"
+                            " pair it with a few percent of Ghost Reduction: Black Floor. Try 130%"
+                            " first.",
+                .isHidden = hideUnlessLeiaSR,
+            });
+        graphics_tuner_control(*this, leftPane, rightPane,
+            GraphicsTunerProps{
+                .option = GraphicsOption::StereoSrWeaveContrast,
+                .title = "LeiaSR Weave Contrast",
+                .helpText = "The LeiaSR weaver's own contrast, as a multiple of the panel's"
+                            " default -- 100% is the display as shipped. Lowering it squeezes the"
+                            " image toward mid grey much like Ghost Reduction: Contrast, giving"
+                            " the panel's cancellation room to work. Try 97% first.",
+                .isHidden = hideUnlessLeiaSR,
             });
         config_bool_select(leftPane, rightPane, getSettings().game.stereoAutoConvergence,
             {

@@ -319,6 +319,7 @@ template class ConfigImpl<GameLanguage>;
 template class ConfigImpl<AudioOutputMode>;
 template class ConfigImpl<LetterboxMode>;
 template class ConfigImpl<StereoMode>;
+template class ConfigImpl<StereoSrCrosstalkMode>;
 
 template <>
 void ConfigImpl<FrameInterpMode>::loadFromJson(

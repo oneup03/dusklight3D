@@ -99,6 +99,15 @@ enum class StereoMode : int {
     LeiaSR = 7,
 };
 
+// The LeiaSR weaver's own crosstalk-cancellation mode. Values match
+// AuroraSrCrosstalkMode.
+enum class StereoSrCrosstalkMode : int {
+    Default = 0,
+    Off = 1,
+    Static = 2,
+    Dynamic = 3,
+};
+
 namespace config {
 template <>
 struct ConfigEnumRange<BloomMode> {
@@ -176,6 +185,12 @@ template <>
 struct ConfigEnumRange<StereoMode> {
     static constexpr auto min = StereoMode::Off;
     static constexpr auto max = StereoMode::LeiaSR;
+};
+
+template <>
+struct ConfigEnumRange<StereoSrCrosstalkMode> {
+    static constexpr auto min = StereoSrCrosstalkMode::Default;
+    static constexpr auto max = StereoSrCrosstalkMode::Dynamic;
 };
 
 template <>
@@ -288,6 +303,12 @@ struct UserSettings {
         // 1.0 and black floor 0.0 are exact no-ops. See AuroraStereoConfig.
         ConfigVar<float> stereoGhostContrast;
         ConfigVar<float> stereoGhostBlackFloor;
+        // The LeiaSR weaver's own anti-crosstalk. Strength and contrast are
+        // multiples of the panel's own values, so (Default, 1.0, 1.0) is the
+        // display as shipped. See AuroraStereoConfig::srCrosstalk*.
+        ConfigVar<StereoSrCrosstalkMode> stereoSrCrosstalkMode;
+        ConfigVar<float> stereoSrCrosstalkStrength;
+        ConfigVar<float> stereoSrWeaveContrast;
         // Depth-buffer-driven auto-convergence. Target is the total crossed
         // (pop-out) disparity budget for the nearest object, in the same
         // screen-width-fraction units as stereoSeparation. Smoothing is the

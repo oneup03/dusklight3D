@@ -2,6 +2,9 @@ name: Build
 
 on:
   push:
+    # Built by frame-probe.yml instead.
+    branches-ignore:
+      - frame-sbs-overlay-probe
     paths-ignore:
       - '*.md'
       - '*LICENSE'

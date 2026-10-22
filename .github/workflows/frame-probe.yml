@@ -1,0 +1,40 @@
+name: Frame SbS overlay probe
+
+on:
+  push:
+    branches:
+      - frame-sbs-overlay-probe
+    paths:
+      - 'tools/frame-sbs-overlay-probe/**'
+      - '.github/workflows/frame-probe.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build probe (aarch64)
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+
+      - name: Build
+        run: sh tools/frame-sbs-overlay-probe/build.sh
+
+      - name: Smoke test
+        working-directory: tools/frame-sbs-overlay-probe
+        run: |
+          file sbs-overlay-probe
+          ldd sbs-overlay-probe
+          ./sbs-overlay-probe --help
+
+      # Tarred so the executable bit survives the artifact zip.
+      - name: Package
+        run: tar czf sbs-overlay-probe-aarch64.tar.gz -C tools/frame-sbs-overlay-probe sbs-overlay-probe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbs-overlay-probe-aarch64
+          path: sbs-overlay-probe-aarch64.tar.gz

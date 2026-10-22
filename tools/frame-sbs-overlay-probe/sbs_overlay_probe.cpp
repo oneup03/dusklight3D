@@ -67,6 +67,7 @@ struct Options {
   bool swapEyes = false;
   bool linear = true;  // false: let GBM choose from SteamVR's modifier list
   bool animate = true;
+  bool rays = true;    // measure dashboard-placed screens with ComputeOverlayIntersection
   bool window = true;  // open a blank window (when DISPLAY is set) so Steam gives us a screen
   double wait = -1.0;  // seconds to keep looking for the game screen; <0 = 30 with a window, else 0
   std::string logPath;  // empty = ~/sbs-overlay-probe.log when stdout is not a terminal
@@ -89,6 +90,7 @@ void usage() {
       "  --swap-eyes          use SideBySide_Crossed instead of SideBySide_Parallel\n"
       "  --native-modifier    allocate with SteamVR's modifier list instead of LINEAR\n"
       "  --static             submit one frame only (no moving bar)\n"
+      "  --no-rays            size dashboard-placed screens from sampled points only\n"
       "  --no-window          don't open a window (cover another app's screen instead)\n"
       "  --wait N             keep looking for the game screen for N seconds\n"
       "                       (default 30 with a window, else 0)\n"
@@ -138,6 +140,8 @@ bool parse_args(int argc, char** argv, Options& o) {
       o.linear = false;
     } else if (a == "--static") {
       o.animate = false;
+    } else if (a == "--no-rays") {
+      o.rays = false;
     } else if (a == "--no-window") {
       o.window = false;
     } else if (a == "--wait") {
@@ -645,19 +649,97 @@ struct SourcePlacement {
   float widthM = 0.f;
   float heightM = 0.f;  // sampled only
   float curvature = 0.f;
-  float widthSetting = 0.f;  // the source's own SetOverlayWidthInMeters value
   vr::HmdVector2_t mouseScale{};  // sampled only
-  // Diagnostics for sampled placements: the scale in the matrix SteamVR returns for the
-  // center point, and its Z axis against ours (+1 same, -1 opposite).
-  float matrixScale = 0.f;
-  float facing = 0.f;
+  float pointsWidthM = 0.f;  // width from sampled points, before any ray measurement
+  bool measuredByRays = false;
+  std::string rayFailure;  // why the ray measurement was skipped, if it was
 
+  // Ray-measured placements jitter slightly with the head, so compare with a tolerance
+  // (1 mm, 0.0001 in the rotation) rather than exactly.
   bool same_as(const SourcePlacement& o) const {
-    return type == o.type && sampled == o.sampled && origin == o.origin && device == o.device &&
-           std::memcmp(&matrix, &o.matrix, sizeof matrix) == 0 && widthM == o.widthM &&
-           curvature == o.curvature;
+    if (type != o.type || sampled != o.sampled || origin != o.origin || device != o.device ||
+        measuredByRays != o.measuredByRays)
+      return false;
+    for (int row = 0; row < 3; ++row) {
+      for (int col = 0; col < 4; ++col) {
+        if (std::fabs(matrix.m[row][col] - o.matrix.m[row][col]) > (col == 3 ? 1e-3f : 1e-4f))
+          return false;
+      }
+    }
+    return std::fabs(widthM - o.widthM) <= 1e-3f && std::fabs(curvature - o.curvature) <= 1e-4f;
   }
 };
+
+void set_pose(vr::HmdMatrix34_t& m, Vec3 x, Vec3 y, Vec3 z, Vec3 pos) {
+  const Vec3 cols[4] = {x, y, z, pos};
+  for (int col = 0; col < 4; ++col) {
+    m.m[0][col] = cols[col].x;
+    m.m[1][col] = cols[col].y;
+    m.m[2][col] = cols[col].z;
+  }
+}
+
+// GetTransformForOverlayCoordinates ignores the scale the Frame applies when you resize
+// a dashboard-placed screen: it reports the true center but the unscaled size. The
+// laser hit test has to match what is drawn, so cast rays from the head through the
+// center and through points 15% of the (unscaled) size right and up, and take the true
+// size, center and orientation from where they land and at which UVs. 15% stays on the
+// screen even after shrinking it to under a third of its size.
+bool measure_with_rays(vr::VROverlayHandle_t src, Vec3 head, SourcePlacement& p, std::string& why) {
+  const Vec3 c{p.matrix.m[0][3], p.matrix.m[1][3], p.matrix.m[2][3]};
+  const Vec3 x{p.matrix.m[0][0], p.matrix.m[1][0], p.matrix.m[2][0]};
+  const Vec3 y{p.matrix.m[0][1], p.matrix.m[1][1], p.matrix.m[2][1]};
+  const Vec3 targets[3] = {c, c + x * (0.15f * p.widthM), c + y * (0.15f * p.heightM)};
+  Vec3 hit[3];
+  float u[3], v[3];
+  for (int i = 0; i < 3; ++i) {
+    const Vec3 dir = targets[i] - head;
+    const float len = length(dir);
+    if (len < 1e-4f) {
+      why = "rays: head is on the screen";
+      return false;
+    }
+    vr::VROverlayIntersectionParams_t params{};
+    params.vSource = {{head.x, head.y, head.z}};
+    params.vDirection = {{dir.x / len, dir.y / len, dir.z / len}};
+    params.eOrigin = vr::TrackingUniverseStanding;
+    vr::VROverlayIntersectionResults_t res{};
+    if (!g_overlay->ComputeOverlayIntersection(src, &params, &res)) {
+      why = "rays: no intersection with the game screen";
+      return false;
+    }
+    hit[i] = {res.vPoint.v[0], res.vPoint.v[1], res.vPoint.v[2]};
+    u[i] = res.vUVs.v[0];
+    v[i] = res.vUVs.v[1];
+  }
+  // The center ray tells us whether UVs come back normalized or in mouse-scale pixels.
+  if (std::fabs(u[0]) > 1.5f || std::fabs(v[0]) > 1.5f) {
+    for (int i = 0; i < 3; ++i) {
+      u[i] /= p.mouseScale.v[0];
+      v[i] /= p.mouseScale.v[1];
+    }
+  }
+  const float du = u[1] - u[0], dv = v[2] - v[0];
+  const Vec3 dx = hit[1] - hit[0], dy = hit[2] - hit[0];
+  if (std::fabs(du) < 1e-4f || std::fabs(dv) < 1e-4f || length(dx) < 1e-4f || length(dy) < 1e-4f) {
+    why = "rays: hits too close together to measure";
+    return false;
+  }
+  const float width = length(dx) / std::fabs(du);
+  const float height = length(dy) / std::fabs(dv);
+  const Vec3 xr = dx * (1.f / length(dx));
+  Vec3 up = dy - xr * dot(dy, xr);
+  up = up * (1.f / length(up));
+  const Vec3 zr = cross(xr, up);
+  // Move from the center hit to where the UV is (0.5, 0.5), whichever way the UVs run.
+  const Vec3 center = hit[0] + xr * ((0.5f - u[0]) * width * (du > 0 ? 1.f : -1.f)) +
+                      up * ((0.5f - v[0]) * height * (dv > 0 ? 1.f : -1.f));
+  set_pose(p.matrix, xr, up, zr, center + zr * 0.01f);
+  p.widthM = width;
+  p.heightM = height;
+  p.measuredByRays = true;
+  return true;
+}
 
 // Steam's game screen on the Frame is a DashboardTab overlay: the dashboard places it
 // and there is no getter for that transform. GetTransformForOverlayCoordinates still
@@ -670,8 +752,7 @@ bool sample_placement(vr::VROverlayHandle_t src, SourcePlacement& p, std::string
       scale.v[1] <= 0.f)
     scale.v[0] = scale.v[1] = 1.f;
   const float w = scale.v[0], h = scale.v[1];
-  vr::HmdMatrix34_t centerMatrix{};
-  const auto at = [&](float u, float v, Vec3& out, vr::HmdMatrix34_t* keep = nullptr) {
+  const auto at = [&](float u, float v, Vec3& out) {
     vr::HmdMatrix34_t m{};
     const vr::EVROverlayError e =
         g_overlay->GetTransformForOverlayCoordinates(src, vr::TrackingUniverseStanding, vr::HmdVector2_t{{u, v}}, &m);
@@ -680,13 +761,10 @@ bool sample_placement(vr::VROverlayHandle_t src, SourcePlacement& p, std::string
       return false;
     }
     out = {m.m[0][3], m.m[1][3], m.m[2][3]};
-    if (keep)
-      *keep = m;
     return true;
   };
   Vec3 c{}, l{}, r{}, t{};
-  if (!at(w * 0.5f, h * 0.5f, c, &centerMatrix) || !at(0.f, h * 0.5f, l) || !at(w, h * 0.5f, r) ||
-      !at(w * 0.5f, h, t))
+  if (!at(w * 0.5f, h * 0.5f, c) || !at(0.f, h * 0.5f, l) || !at(w, h * 0.5f, r) || !at(w * 0.5f, h, t))
     return false;
 
   const float chord = length(r - l);
@@ -713,29 +791,20 @@ bool sample_placement(vr::VROverlayHandle_t src, SourcePlacement& p, std::string
   const float widthM = a > 1e-4f ? chord * a / std::sin(a) : chord;
 
   // 1 cm toward the viewer so we also win the back-to-front ordering.
-  const Vec3 pos = c + z * 0.01f;
-  const Vec3 cols[4] = {x, y, z, pos};
-  for (int col = 0; col < 4; ++col) {
-    p.matrix.m[0][col] = cols[col].x;
-    p.matrix.m[1][col] = cols[col].y;
-    p.matrix.m[2][col] = cols[col].z;
-  }
+  set_pose(p.matrix, x, y, z, c + z * 0.01f);
   p.sampled = true;
   p.origin = vr::TrackingUniverseStanding;
   p.widthM = widthM;
+  p.pointsWidthM = widthM;
   p.heightM = 2.f * halfHeight;
   p.curvature = curvature;
   p.mouseScale = scale;
-  g_overlay->GetOverlayWidthInMeters(src, &p.widthSetting);
-  const auto& cm = centerMatrix.m;
-  p.matrixScale = length(Vec3{cm[0][0], cm[1][0], cm[2][0]});
-  const Vec3 cz{cm[0][2], cm[1][2], cm[2][2]};
-  const float czLen = length(cz);
-  p.facing = czLen > 1e-6f ? dot(cz, z) / czLen : 0.f;
+  p.measuredByRays = false;
   return true;
 }
 
-bool read_placement(vr::VROverlayHandle_t src, SourcePlacement& p, std::string& why) {
+// head: where to cast measuring rays from, or null to skip them.
+bool read_placement(vr::VROverlayHandle_t src, SourcePlacement& p, std::string& why, const Vec3* head) {
   vr::EVROverlayError e = g_overlay->GetOverlayTransformType(src, &p.type);
   if (e != vr::VROverlayError_None) {
     why = std::string("GetOverlayTransformType: ") + ov_err(e);
@@ -745,8 +814,18 @@ bool read_placement(vr::VROverlayHandle_t src, SourcePlacement& p, std::string& 
     e = g_overlay->GetOverlayTransformAbsolute(src, &p.origin, &p.matrix);
   else if (p.type == vr::VROverlayTransform_TrackedDeviceRelative)
     e = g_overlay->GetOverlayTransformTrackedDeviceRelative(src, &p.device, &p.matrix);
-  else
-    return sample_placement(src, p, why);
+  else {
+    if (!sample_placement(src, p, why))
+      return false;
+    p.rayFailure = head ? std::string() : std::string("rays off");
+    if (head) {
+      // On failure the sampled-points placement stands.
+      SourcePlacement measured = p;
+      if (measure_with_rays(src, *head, measured, p.rayFailure))
+        p = measured;
+    }
+    return true;
+  }
   if (e != vr::VROverlayError_None) {
     why = std::string("reading the game screen transform: ") + ov_err(e);
     return false;
@@ -754,7 +833,6 @@ bool read_placement(vr::VROverlayHandle_t src, SourcePlacement& p, std::string& 
   p.sampled = false;
   g_overlay->GetOverlayWidthInMeters(src, &p.widthM);
   g_overlay->GetOverlayCurvature(src, &p.curvature);
-  p.widthSetting = p.widthM;
   return true;
 }
 
@@ -766,6 +844,18 @@ void apply_placement(vr::VROverlayHandle_t dst, const SourcePlacement& p) {
   if (p.widthM > 0.f)
     g_overlay->SetOverlayWidthInMeters(dst, p.widthM);
   g_overlay->SetOverlayCurvature(dst, p.curvature);
+}
+
+bool head_position(vr::IVRSystem* sys, Vec3& out) {
+  if (!sys)
+    return false;
+  vr::TrackedDevicePose_t pose{};
+  sys->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0.f, &pose, 1);
+  if (!pose.bPoseIsValid)
+    return false;
+  const auto& m = pose.mDeviceToAbsoluteTracking.m;
+  out = {m[0][3], m[1][3], m[2][3]};
+  return true;
 }
 
 // Level, yaw-only placement `distance` metres ahead of the headset, facing it.
@@ -1288,7 +1378,8 @@ int main(int argc, char** argv) {
       }
       SourcePlacement p;
       std::string why;
-      if (!read_placement(handle, p, why)) {
+      Vec3 head{};
+      if (!read_placement(handle, p, why, opt.rays && head_position(sys, head) ? &head : nullptr)) {
         fail(why);
         return false;
       }
@@ -1299,8 +1390,11 @@ int main(int argc, char** argv) {
       g_overlay->SetOverlaySortOrder(ours, sort);
       if (p.sampled) {
         const Vec3 c{p.matrix.m[0][3], p.matrix.m[1][3], p.matrix.m[2][3]};
-        OK("following %s by sampling points on it: %.2f x %.2f m, curvature %.2f, sort order %u",
-           transform_type_name(p.type), p.widthM, p.heightM, p.curvature, sort);
+        OK("following %s, measured by %s: %.2f x %.2f m, curvature %.2f, sort order %u",
+           transform_type_name(p.type), p.measuredByRays ? "rays" : "sampled points", p.widthM, p.heightM,
+           p.curvature, sort);
+        if (!p.measuredByRays)
+          INFO("not using rays: %s", p.rayFailure.c_str());
         INFO("mouse scale %.0f x %.0f, center (%.2f, %.2f, %.2f) m", p.mouseScale.v[0], p.mouseScale.v[1], c.x, c.y,
              c.z);
         const double ourAspect = double(opt.eyeWidth) / opt.eyeHeight * opt.texelAspect;
@@ -1369,15 +1463,12 @@ int main(int argc, char** argv) {
     bool settled = true;
     const auto log_placement = [&](const char* what, double t) {
       const Vec3 c{placement.matrix.m[0][3], placement.matrix.m[1][3], placement.matrix.m[2][3]};
-      vr::TrackedDevicePose_t head{};
-      if (sys)
-        sys->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0.f, &head, 1);
-      const auto& hm = head.mDeviceToAbsoluteTracking.m;
-      const float dist = head.bPoseIsValid ? length(c - Vec3{hm[0][3], hm[1][3], hm[2][3]}) : -1.f;
-      INFO("[%6.1fs] %-8s setting %.2f m | ours %.2f x %.2f m at (%.2f, %.2f, %.2f), %.2f m from head | "
-           "matrix scale %.3f, facing %+.2f",
-           t, what, placement.widthSetting, placement.widthM, placement.heightM, c.x, c.y, c.z, dist,
-           placement.matrixScale, placement.facing);
+      Vec3 head{};
+      const float dist = head_position(sys, head) ? length(c - head) : -1.f;
+      INFO("[%6.1fs] %-8s ours %.2f x %.2f m (%s; points said %.2f) at (%.2f, %.2f, %.2f), %.2f m from head",
+           t, what, placement.widthM, placement.heightM,
+           placement.measuredByRays ? "rays" : placement.rayFailure.c_str(), placement.pointsWidthM, c.x, c.y,
+           c.z, dist);
     };
     if (source != vr::k_ulOverlayHandleInvalid)
       log_placement("start", 0.0);
@@ -1433,7 +1524,9 @@ int main(int argc, char** argv) {
         const auto f0 = clock::now();
         SourcePlacement p;
         std::string why;
-        if (read_placement(source, p, why) && !p.same_as(placement)) {
+        Vec3 head{};
+        if (read_placement(source, p, why, opt.rays && head_position(sys, head) ? &head : nullptr) &&
+            !p.same_as(placement)) {
           placement = p;
           apply_placement(ours, placement);
           ++moves;

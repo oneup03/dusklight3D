@@ -1122,6 +1122,30 @@ int main(int argc, char** argv) {
       OK("%s", vr::IVRSystem_Version);
     else
       BAD("%s: %s (front placement falls back to head-locked)", vr::IVRSystem_Version, api.describe(e).c_str());
+    // Read-only: a possible second source for the resized screen's true scale.
+    auto* settings = static_cast<vr::IVRSettings*>(api.GetGenericInterface(vr::IVRSettings_Version, &e));
+    if (settings)
+      OK("%s (read-only)", vr::IVRSettings_Version);
+    else
+      BAD("%s: %s", vr::IVRSettings_Version, api.describe(e).c_str());
+    const auto dashboard_scale = [&]() -> std::string {
+      if (!settings)
+        return "n/a";
+      vr::EVRSettingsError se = vr::VRSettingsError_None;
+      const float v = settings->GetFloat(vr::k_pch_Dashboard_Section, vr::k_pch_Dashboard_DashboardScale, &se);
+      if (se != vr::VRSettingsError_None)
+        return settings->GetSettingsErrorNameFromEnum(se);
+      char buf[32];
+      std::snprintf(buf, sizeof buf, "%.3f", v);
+      return buf;
+    };
+    if (settings) {
+      char pos[256] = {};
+      vr::EVRSettingsError se = vr::VRSettingsError_None;
+      settings->GetString(vr::k_pch_Dashboard_Section, vr::k_pch_Dashboard_Position, pos, sizeof pos, &se);
+      INFO("dashboard settings: dashboardScale %s, position %s", dashboard_scale().c_str(),
+           se == vr::VRSettingsError_None ? pos : settings->GetSettingsErrorNameFromEnum(se));
+    }
     ipc = static_cast<vr::IVRIPCResourceManagerClient*>(
         api.GetGenericInterface(vr::IVRIPCResourceManagerClient_Version, &e));
     if (!ipc) {
@@ -1465,10 +1489,11 @@ int main(int argc, char** argv) {
       const Vec3 c{placement.matrix.m[0][3], placement.matrix.m[1][3], placement.matrix.m[2][3]};
       Vec3 head{};
       const float dist = head_position(sys, head) ? length(c - head) : -1.f;
-      INFO("[%6.1fs] %-8s ours %.2f x %.2f m (%s; points said %.2f) at (%.2f, %.2f, %.2f), %.2f m from head",
+      INFO("[%6.1fs] %-8s ours %.2f x %.2f m (%s; points said %.2f; dashboardScale %s) at (%.2f, %.2f, %.2f), "
+           "%.2f m from head",
            t, what, placement.widthM, placement.heightM,
-           placement.measuredByRays ? "rays" : placement.rayFailure.c_str(), placement.pointsWidthM, c.x, c.y,
-           c.z, dist);
+           placement.measuredByRays ? "rays" : placement.rayFailure.c_str(), placement.pointsWidthM,
+           dashboard_scale().c_str(), c.x, c.y, c.z, dist);
     };
     if (source != vr::k_ulOverlayHandleInvalid)
       log_placement("start", 0.0);

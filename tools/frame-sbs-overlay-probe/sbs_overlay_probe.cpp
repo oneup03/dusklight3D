@@ -66,6 +66,9 @@ struct Options {
   bool swapEyes = false;
   bool linear = true;  // false: let GBM choose from SteamVR's modifier list
   bool animate = true;
+  bool window = true;  // open a blank window (when DISPLAY is set) so Steam gives us a screen
+  double wait = -1.0;  // seconds to keep looking for the game screen; <0 = 30 with a window, else 0
+  std::string logPath;  // empty = ~/sbs-overlay-probe.log when stdout is not a terminal
   double fps = 60.0;
   double seconds = 0.0;  // 0 = until Ctrl+C
   std::string openvrLib = "/opt/steamvr/bin/linuxarm64/libopenvr_api.so";
@@ -85,6 +88,11 @@ void usage() {
       "  --swap-eyes          use SideBySide_Crossed instead of SideBySide_Parallel\n"
       "  --native-modifier    allocate with SteamVR's modifier list instead of LINEAR\n"
       "  --static             submit one frame only (no moving bar)\n"
+      "  --no-window          don't open a window (cover another app's screen instead)\n"
+      "  --wait N             keep looking for the game screen for N seconds\n"
+      "                       (default 30 with a window, else 0)\n"
+      "  --log PATH           write output here (default ~/sbs-overlay-probe.log when\n"
+      "                       there is no terminal, e.g. launched from Steam)\n"
       "  --fps N              animation submit rate (default 60)\n"
       "  --seconds N          exit after N seconds (default: run until Ctrl+C)\n"
       "  --openvr-lib PATH    libopenvr_api.so to load\n"
@@ -129,6 +137,12 @@ bool parse_args(int argc, char** argv, Options& o) {
       o.linear = false;
     } else if (a == "--static") {
       o.animate = false;
+    } else if (a == "--no-window") {
+      o.window = false;
+    } else if (a == "--wait") {
+      o.wait = std::strtod(next("--wait"), nullptr);
+    } else if (a == "--log") {
+      o.logPath = next("--log");
     } else if (a == "--fps") {
       o.fps = std::max(1.0, std::strtod(next("--fps"), nullptr));
     } else if (a == "--seconds") {
@@ -335,6 +349,123 @@ struct Gbm {
       return false;
     }
     return true;
+  }
+};
+
+// --------------------------------------------------------------- X11 window
+//
+// A blank window so Gamescope gives this process a game screen of its own. Steam's
+// move and resize controls belong to that screen, and covering it is what makes the
+// 3D image movable. Gamescope finds the owning app from the X client's pid (XRes)
+// and Steam's launcher above it, so a plain Xlib window launched from Steam is enough.
+
+using XID = unsigned long;
+struct XDisplay;
+struct XGCRec;
+union XEventT {
+  int type;
+  long pad[24];  // ClientMessage: data.l[0] is pad[7] on LP64
+};
+constexpr int kExpose = 12;
+constexpr int kClientMessage = 33;
+constexpr long kExposureMask = 1L << 15;
+
+struct X11Window {
+  void* lib = nullptr;
+  XDisplay* dpy = nullptr;
+  XID win = 0;
+  XID wmDelete = 0;
+  std::vector<std::string> lines;
+
+  XDisplay* (*OpenDisplay)(const char*) = nullptr;
+  int (*CloseDisplay)(XDisplay*) = nullptr;
+  int (*DefaultScreen)(XDisplay*) = nullptr;
+  XID (*RootWindow)(XDisplay*, int) = nullptr;
+  unsigned long (*BlackPixel)(XDisplay*, int) = nullptr;
+  unsigned long (*WhitePixel)(XDisplay*, int) = nullptr;
+  XID (*CreateSimpleWindow)(XDisplay*, XID, int, int, unsigned, unsigned, unsigned, unsigned long,
+                            unsigned long) = nullptr;
+  int (*StoreName)(XDisplay*, XID, const char*) = nullptr;
+  XID (*InternAtom)(XDisplay*, const char*, int) = nullptr;
+  int (*SetWMProtocols)(XDisplay*, XID, XID*, int) = nullptr;
+  int (*SelectInput)(XDisplay*, XID, long) = nullptr;
+  int (*MapWindow)(XDisplay*, XID) = nullptr;
+  int (*Flush)(XDisplay*) = nullptr;
+  int (*Pending)(XDisplay*) = nullptr;
+  int (*NextEvent)(XDisplay*, XEventT*) = nullptr;
+  int (*DestroyWindow)(XDisplay*, XID) = nullptr;
+  XGCRec* (*DefaultGC)(XDisplay*, int) = nullptr;
+  int (*SetForeground)(XDisplay*, XGCRec*, unsigned long) = nullptr;
+  int (*DrawString)(XDisplay*, XID, XGCRec*, int, int, const char*, int) = nullptr;
+
+  bool create(uint32_t width, uint32_t height, std::vector<std::string> text) {
+    lib = dlopen("libX11.so.6", RTLD_NOW | RTLD_LOCAL);
+    if (!lib) {
+      BAD("libX11.so.6 not loadable: %s", dlerror());
+      return false;
+    }
+    const auto sym = [&](auto& fn, const char* name) {
+      fn = reinterpret_cast<std::remove_reference_t<decltype(fn)>>(dlsym(lib, name));
+      return fn != nullptr;
+    };
+    if (!sym(OpenDisplay, "XOpenDisplay") || !sym(CloseDisplay, "XCloseDisplay") ||
+        !sym(DefaultScreen, "XDefaultScreen") || !sym(RootWindow, "XRootWindow") ||
+        !sym(BlackPixel, "XBlackPixel") || !sym(WhitePixel, "XWhitePixel") ||
+        !sym(CreateSimpleWindow, "XCreateSimpleWindow") || !sym(StoreName, "XStoreName") ||
+        !sym(InternAtom, "XInternAtom") || !sym(SetWMProtocols, "XSetWMProtocols") ||
+        !sym(SelectInput, "XSelectInput") || !sym(MapWindow, "XMapWindow") || !sym(Flush, "XFlush") ||
+        !sym(Pending, "XPending") || !sym(NextEvent, "XNextEvent") || !sym(DestroyWindow, "XDestroyWindow") ||
+        !sym(DefaultGC, "XDefaultGC") || !sym(SetForeground, "XSetForeground") ||
+        !sym(DrawString, "XDrawString")) {
+      BAD("libX11 is missing required entry points");
+      return false;
+    }
+    dpy = OpenDisplay(nullptr);
+    if (!dpy) {
+      BAD("XOpenDisplay(%s) failed", std::getenv("DISPLAY"));
+      return false;
+    }
+    const int screen = DefaultScreen(dpy);
+    win = CreateSimpleWindow(dpy, RootWindow(dpy, screen), 0, 0, width, height, 0, BlackPixel(dpy, screen),
+                             BlackPixel(dpy, screen));
+    StoreName(dpy, win, "Dusklight SbS probe");
+    wmDelete = InternAtom(dpy, "WM_DELETE_WINDOW", 0);
+    SetWMProtocols(dpy, win, &wmDelete, 1);
+    SelectInput(dpy, win, kExposureMask);
+    MapWindow(dpy, win);
+    lines = std::move(text);
+    draw();
+    return true;
+  }
+
+  void draw() {
+    const int screen = DefaultScreen(dpy);
+    XGCRec* gc = DefaultGC(dpy, screen);
+    SetForeground(dpy, gc, WhitePixel(dpy, screen));
+    for (size_t i = 0; i < lines.size(); ++i)
+      DrawString(dpy, win, gc, 24, 40 + int(i) * 20, lines[i].c_str(), int(lines[i].size()));
+    Flush(dpy);
+  }
+
+  // False once the window is asked to close.
+  bool pump() {
+    while (Pending(dpy) > 0) {
+      XEventT ev{};
+      NextEvent(dpy, &ev);
+      if (ev.type == kExpose)
+        draw();
+      else if (ev.type == kClientMessage && XID(ev.pad[7]) == wmDelete)
+        return false;
+    }
+    return true;
+  }
+
+  void destroy() {
+    if (dpy) {
+      DestroyWindow(dpy, win);
+      CloseDisplay(dpy);
+      dpy = nullptr;
+    }
   }
 };
 
@@ -706,9 +837,36 @@ int main(int argc, char** argv) {
   signal(SIGINT, on_signal);
   signal(SIGTERM, on_signal);
 
+  // Launched from Steam there is no terminal, so keep the output in a file.
+  std::string logPath = opt.logPath;
+  if (logPath.empty() && !isatty(STDOUT_FILENO)) {
+    const char* home = std::getenv("HOME");
+    logPath = std::string(home && *home ? home : "/tmp") + "/sbs-overlay-probe.log";
+  }
+  if (!logPath.empty()) {
+    if (std::freopen(logPath.c_str(), "w", stdout))
+      dup2(STDOUT_FILENO, STDERR_FILENO);
+    std::setvbuf(stdout, nullptr, _IOLBF, 0);
+  }
+
   const uint32_t texW = opt.eyeWidth * 2, texH = opt.eyeHeight;
   std::printf("Steam Frame full-SbS overlay probe: %ux%u per eye -> %ux%u texture\n", opt.eyeWidth,
               opt.eyeHeight, texW, texH);
+
+  X11Window window;
+  bool haveWindow = false;
+  if (opt.window && std::getenv("DISPLAY")) {
+    section("Window");
+    haveWindow = window.create(
+        opt.eyeWidth, opt.eyeHeight,
+        {"Dusklight SbS overlay probe",
+         "The 3D test pattern should cover this screen. Move or resize it with Steam's controls.",
+         "If you can read this, the pattern is not covering it.",
+         "Output: " + (logPath.empty() ? std::string("terminal") : logPath)});
+    if (haveWindow)
+      OK("opened a %ux%u window so Steam gives this app a game screen", opt.eyeWidth, opt.eyeHeight);
+  }
+  const double waitSeconds = opt.front ? 0.0 : opt.wait >= 0.0 ? opt.wait : haveWindow ? 30.0 : 0.0;
 
   check_vulkan();
 
@@ -943,64 +1101,80 @@ int main(int argc, char** argv) {
     else
       BAD("created, but the side-by-side flag did not stick (flags 0x%08x)", flags);
 
-    // ---- placement: over the game screen if we can find it
+    // ---- placement: over the game screen, which Steam lets you move and resize; we
+    // copy its placement every frame. Until it exists, sit in front of the headset.
     vr::VROverlayHandle_t source = vr::k_ulOverlayHandleInvalid;
     SourcePlacement placement;
-    if (!opt.front) {
-      std::string key = opt.cover;
-      if (key.empty()) {
-        const std::vector<Listed> screens = list_game_screens(opt.vrcmd);
+    // Repeat attempts while waiting pass verbose=false so failures don't spam the log.
+    const auto find_screen = [&](bool verbose) -> std::string {
+      if (!opt.cover.empty())
+        return opt.cover;
+      const std::vector<Listed> screens = list_game_screens(opt.vrcmd);
+      if (verbose) {
         for (const Listed& s : screens)
           INFO("game screen: %s (%s)", s.key.c_str(), s.visible ? "visible" : "hidden");
-        key = choose_game_screen(screens);
-        if (key.empty())
-          BAD("%s", screens.empty() ? "no Gamescope game screen found (is a game running?)" :
-                                     "several game screens; pick one with --cover KEY");
       }
-      if (!key.empty()) {
-        oe = g_overlay->FindOverlay(key.c_str(), &source);
-        if (oe != vr::VROverlayError_None) {
-          BAD("FindOverlay(%s): %s", key.c_str(), ov_err(oe));
-          source = vr::k_ulOverlayHandleInvalid;
-        } else {
-          INFO("covering %s", key.c_str());
-          float texel = 0.f;
-          uint32_t srcW = 0, srcH = 0, srcSort = 0, srcFlags = 0;
-          g_overlay->GetOverlayTexelAspect(source, &texel);
-          g_overlay->GetOverlaySortOrder(source, &srcSort);
-          g_overlay->GetOverlayFlags(source, &srcFlags);
-          const vr::EVROverlayError sizeErr = g_overlay->GetOverlayTextureSize(source, &srcW, &srcH);
-          if (sizeErr == vr::VROverlayError_None)
-            INFO("game screen texture %ux%u, texel aspect %.3f, sort order %u, flags 0x%08x", srcW, srcH, texel,
-                 srcSort, srcFlags);
-          else
-            INFO("game screen texture size unavailable (%s), texel aspect %.3f, sort order %u, flags 0x%08x",
-                 ov_err(sizeErr), texel, srcSort, srcFlags);
-          if (srcFlags & (vr::VROverlayFlags_SideBySide_Parallel | vr::VROverlayFlags_SideBySide_Crossed))
-            INFO("note: the game screen currently has SbS enabled (frame-sbs-toggle?)");
-          if (sizeErr == vr::VROverlayError_None && srcW > 0 && srcH > 0) {
-            const double srcAspect = double(srcW) / srcH * texel;
-            const double ourAspect = double(opt.eyeWidth) / opt.eyeHeight * opt.texelAspect;
-            if (std::fabs(srcAspect - ourAspect) > 0.01)
-              INFO("aspect differs (screen %.3f vs probe %.3f per eye); --eye can match it", srcAspect, ourAspect);
-          }
-          if (read_placement(source, placement, true)) {
-            apply_placement(ours, placement);
-            g_overlay->SetOverlaySortOrder(ours, srcSort == UINT32_MAX ? srcSort : srcSort + 1);
-            OK("placed over the game screen (%s, %.2f m wide, curvature %.2f, sort order %u)",
-               transform_type_name(placement.type), placement.widthM, placement.curvature,
-               srcSort == UINT32_MAX ? srcSort : srcSort + 1);
-          } else {
-            source = vr::k_ulOverlayHandleInvalid;
-          }
-        }
+      std::string key = choose_game_screen(screens);
+      if (key.empty() && verbose)
+        BAD("%s", screens.empty() ? "no Gamescope game screen found yet" :
+                                   "several game screens; pick one with --cover KEY");
+      return key;
+    };
+    const auto attach = [&](const std::string& key, bool verbose) -> bool {
+      vr::VROverlayHandle_t handle = vr::k_ulOverlayHandleInvalid;
+      const vr::EVROverlayError fe = g_overlay->FindOverlay(key.c_str(), &handle);
+      if (fe != vr::VROverlayError_None) {
+        if (verbose)
+          BAD("FindOverlay(%s): %s", key.c_str(), ov_err(fe));
+        return false;
       }
+      SourcePlacement p;
+      if (!read_placement(handle, p, verbose))
+        return false;
+      source = handle;
+      placement = p;
+      apply_placement(ours, placement);
+
+      INFO("covering %s", key.c_str());
+      float texel = 0.f;
+      uint32_t srcW = 0, srcH = 0, srcSort = 0, srcFlags = 0;
+      g_overlay->GetOverlayTexelAspect(source, &texel);
+      g_overlay->GetOverlaySortOrder(source, &srcSort);
+      g_overlay->GetOverlayFlags(source, &srcFlags);
+      const vr::EVROverlayError sizeErr = g_overlay->GetOverlayTextureSize(source, &srcW, &srcH);
+      if (sizeErr == vr::VROverlayError_None)
+        INFO("game screen texture %ux%u, texel aspect %.3f, sort order %u, flags 0x%08x", srcW, srcH, texel,
+             srcSort, srcFlags);
+      else
+        INFO("game screen texture size unavailable (%s), texel aspect %.3f, sort order %u, flags 0x%08x",
+             ov_err(sizeErr), texel, srcSort, srcFlags);
+      if (srcFlags & (vr::VROverlayFlags_SideBySide_Parallel | vr::VROverlayFlags_SideBySide_Crossed))
+        INFO("note: the game screen currently has SbS enabled (frame-sbs-toggle?)");
+      if (sizeErr == vr::VROverlayError_None && srcW > 0 && srcH > 0) {
+        const double srcAspect = double(srcW) / srcH * texel;
+        const double ourAspect = double(opt.eyeWidth) / opt.eyeHeight * opt.texelAspect;
+        if (std::fabs(srcAspect - ourAspect) > 0.01)
+          INFO("aspect differs (screen %.3f vs probe %.3f per eye); --eye can match it", srcAspect, ourAspect);
+      }
+      const uint32_t sort = srcSort == UINT32_MAX ? srcSort : srcSort + 1;
+      g_overlay->SetOverlaySortOrder(ours, sort);
+      OK("placed over the game screen (%s, %.2f m wide, curvature %.2f, sort order %u)",
+         transform_type_name(placement.type), placement.widthM, placement.curvature, sort);
+      return true;
+    };
+
+    bool attached = false;
+    if (!opt.front) {
+      const std::string key = find_screen(true);
+      attached = !key.empty() && attach(key, true);
     }
-    if (source == vr::k_ulOverlayHandleInvalid) {
+    if (!attached) {
       if (place_in_front(sys, ours, opt.distance, opt.widthM))
         OK("placed %.1f m in front of the headset, %.2f m wide", opt.distance, opt.widthM);
       else
         BAD("could not place the overlay");
+      if (waitSeconds > 0)
+        INFO("will keep looking for the game screen for %.0f s", waitSeconds);
     }
 
     oe = g_overlay->ShowOverlay(ours);
@@ -1018,8 +1192,9 @@ int main(int argc, char** argv) {
         "     distance both shimmer: the overlay has more texels than the panel shows.)\n"
         "  4. Motion: the magenta bar (in front) should slide smoothly with no flicker.\n"
         "  5. Cover: the pattern should sit exactly over the game screen and follow it when\n"
-        "     moved or recentered. Check whether the laser still reaches the game screen.\n"
-        "  Ctrl+C to exit.\n",
+        "     you move, resize or recenter it with Steam's controls. Check whether the\n"
+        "     laser still reaches the screen's controls with the pattern on top.\n"
+        "  Ctrl+C (or quit the app in Steam) to exit.\n",
         opt.animate ? "; the magenta bar is in front too" : "");
 
     // ---- submit loop
@@ -1029,10 +1204,10 @@ int main(int argc, char** argv) {
     // Static mode only needs to keep polling events and following the game screen.
     const clock::duration step =
         opt.animate ? std::chrono::duration_cast<clock::duration>(std::chrono::duration<double>(1.0 / opt.fps)) :
-                      clock::duration(std::chrono::milliseconds(50));
+                      clock::duration(std::chrono::milliseconds(16));
     auto nextFrame = start;
-    auto lastFollow = start, lastStats = start;
-    bool checkedTexture = false;
+    auto lastDetect = start, lastStats = start;
+    bool checkedTexture = false, waitReported = false;
     uint64_t frame = 0;
     uint32_t submits = 0, errors = 0;
     double worstCallMs = 0.0;
@@ -1053,9 +1228,25 @@ int main(int argc, char** argv) {
       }
       while (g_overlay->PollNextOverlayEvent(ours, &ev, sizeof ev)) {
       }
+      if (haveWindow && !window.pump()) {
+        INFO("window closed");
+        g_quit = true;
+      }
 
-      if (source != vr::k_ulOverlayHandleInvalid && now - lastFollow >= std::chrono::milliseconds(100)) {
-        lastFollow = now;
+      if (source == vr::k_ulOverlayHandleInvalid && !opt.front) {
+        if (elapsed < waitSeconds && now - lastDetect >= std::chrono::seconds(1)) {
+          lastDetect = now;
+          const std::string key = find_screen(false);
+          if (!key.empty())
+            attach(key, false);
+        } else if (elapsed >= waitSeconds && waitSeconds > 0 && !waitReported) {
+          waitReported = true;
+          BAD("no game screen appeared within %.0f s; staying in front of the headset", waitSeconds);
+          find_screen(true);  // log what was there
+        }
+      }
+
+      if (source != vr::k_ulOverlayHandleInvalid) {
         SourcePlacement p;
         if (read_placement(source, p, false) && !p.same_as(placement)) {
           placement = p;
@@ -1136,6 +1327,7 @@ int main(int argc, char** argv) {
   if (drmFd >= 0)
     close(drmFd);
   api.ShutdownInternal();
+  window.destroy();
   std::printf("\nDone.\n");
   return exitCode;
 }

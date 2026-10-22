@@ -61,6 +61,9 @@ typedef struct frame3d_config {
   /* Images in the ring. Two are held by SteamVR (shown and previously shown), so
    * 4 lets the host render while another frame waits on its fence. 0 = 4. */
   uint32_t buffer_count;
+  /* FRAME3D_FORMAT_RGBA8 or FRAME3D_FORMAT_BGRA8 to match the host's render
+   * target format; 0 = whichever SteamVR accepts, RGBA8 first. */
+  uint32_t drm_format;
   /* The host fills images on the CPU through frame3d_map. Forces a LINEAR layout. */
   bool cpu_writable;
   /* Use a LINEAR layout even for GPU rendering. By default the driver picks among

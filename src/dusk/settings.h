@@ -97,6 +97,7 @@ enum class StereoMode : int {
     Checkerboard = 5,
     Anaglyph = 6,
     LeiaSR = 7,
+    SteamFrame = 8,  // full SbS on a SteamVR overlay over the Steam screen (Linux)
 };
 
 // The LeiaSR weaver's own crosstalk-cancellation mode. Values match
@@ -184,7 +185,7 @@ struct ConfigEnumRange<AudioOutputMode> {
 template <>
 struct ConfigEnumRange<StereoMode> {
     static constexpr auto min = StereoMode::Off;
-    static constexpr auto max = StereoMode::LeiaSR;
+    static constexpr auto max = StereoMode::SteamFrame;
 };
 
 template <>

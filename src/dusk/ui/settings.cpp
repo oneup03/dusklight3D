@@ -928,8 +928,9 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                 .helpText = "Render the scene twice per frame and combine the eyes for stereoscopic"
                             " 3D output. Side-by-Side and Top-and-Bottom are for compatible 3D"
                             " displays; Anaglyph is for red/cyan glasses; Interlaced and"
-                            " Checkerboard suit passive 3D monitors. The in-game UI is not"
-                            " stereo-aware.",
+                            " Checkerboard suit passive 3D monitors. Steam Frame shows full"
+                            " resolution per eye over the game's screen in the headset (launch"
+                            " from Steam on the Frame). The in-game UI is not stereo-aware.",
             });
         graphics_tuner_control(*this, leftPane, rightPane,
             GraphicsTunerProps{

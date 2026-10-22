@@ -230,11 +230,20 @@ frame3d_context* frame3d_create(const frame3d_config* config) {
     ipc->GetDmabufFormats(&count, formats.data());
     formats.resize(count);
   }
+  const auto accepted = [&](uint32_t f) { return std::find(formats.begin(), formats.end(), f) != formats.end(); };
   uint32_t format = 0;
-  for (const uint32_t candidate : {FRAME3D_FORMAT_RGBA8, FRAME3D_FORMAT_BGRA8}) {
-    if (std::find(formats.begin(), formats.end(), candidate) != formats.end()) {
-      format = candidate;
-      break;
+  if (cfg.drm_format != 0) {
+    if (!accepted(cfg.drm_format)) {
+      log(FRAME3D_LOG_ERROR, "SteamVR doesn't accept dma-buf format %s", frame3d::fourcc_str(cfg.drm_format).c_str());
+      return fail();
+    }
+    format = cfg.drm_format;
+  } else {
+    for (const uint32_t candidate : {FRAME3D_FORMAT_RGBA8, FRAME3D_FORMAT_BGRA8}) {
+      if (accepted(candidate)) {
+        format = candidate;
+        break;
+      }
     }
   }
   if (format == 0) {

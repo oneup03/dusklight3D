@@ -103,6 +103,11 @@ Rml::String format_stereo_mode(int value) {
         // starts working without re-picking the mode.
         return aurora_stereo_mode_supported(AURORA_STEREO_LEIASR) ? "LeiaSR"
                                                                   : "LeiaSR (unavailable)";
+    case StereoMode::SteamFrame:
+        // Same as LeiaSR: selectable whenever SteamVR is installed, presenting mono
+        // in the window until the overlay is up.
+        return aurora_stereo_mode_supported(AURORA_STEREO_STEAM_FRAME) ? "Steam Frame"
+                                                                       : "Steam Frame (unavailable)";
     default:
         return "";
     }
@@ -284,7 +289,7 @@ const GraphicsSetting& GraphicsSetting::of(GraphicsOption option) {
             0, 1, 0, 1, format_bool);
     case GraphicsOption::StereoMode:
         return bind_stereo<[]() -> auto& { return getSettings().game.stereoMode; }>(
-            static_cast<int>(StereoMode::Off), static_cast<int>(StereoMode::LeiaSR),
+            static_cast<int>(StereoMode::Off), static_cast<int>(StereoMode::SteamFrame),
             static_cast<int>(StereoMode::Off), format_stereo_mode);
     case GraphicsOption::StereoSeparation:
         // 0.000..0.150 stored, one click = 0.1% of screen width.

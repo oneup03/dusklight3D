@@ -69,7 +69,9 @@ still be sampling them.
 - **CPU:** set `cpu_writable` and use `frame3d_map` / `frame3d_unmap` (forces a
   LINEAR layout).
 
-`drm_format` is `FRAME3D_FORMAT_RGBA8` (R,G,B,A bytes) or `FRAME3D_FORMAT_BGRA8`.
+`drm_format` is `FRAME3D_FORMAT_RGBA8` (R,G,B,A bytes) or `FRAME3D_FORMAT_BGRA8`; set
+`frame3d_config.drm_format` to match your render target's format, or leave it 0 for
+whichever SteamVR accepts.
 By default the driver picks a layout from those SteamVR accepts (on the Frame,
 Qualcomm's compressed UBWC); if your renderer can't import it, recreate with
 `prefer_linear`.

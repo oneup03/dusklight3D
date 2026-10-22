@@ -645,7 +645,12 @@ struct SourcePlacement {
   float widthM = 0.f;
   float heightM = 0.f;  // sampled only
   float curvature = 0.f;
+  float widthSetting = 0.f;  // the source's own SetOverlayWidthInMeters value
   vr::HmdVector2_t mouseScale{};  // sampled only
+  // Diagnostics for sampled placements: the scale in the matrix SteamVR returns for the
+  // center point, and its Z axis against ours (+1 same, -1 opposite).
+  float matrixScale = 0.f;
+  float facing = 0.f;
 
   bool same_as(const SourcePlacement& o) const {
     return type == o.type && sampled == o.sampled && origin == o.origin && device == o.device &&
@@ -665,7 +670,8 @@ bool sample_placement(vr::VROverlayHandle_t src, SourcePlacement& p, std::string
       scale.v[1] <= 0.f)
     scale.v[0] = scale.v[1] = 1.f;
   const float w = scale.v[0], h = scale.v[1];
-  const auto at = [&](float u, float v, Vec3& out) {
+  vr::HmdMatrix34_t centerMatrix{};
+  const auto at = [&](float u, float v, Vec3& out, vr::HmdMatrix34_t* keep = nullptr) {
     vr::HmdMatrix34_t m{};
     const vr::EVROverlayError e =
         g_overlay->GetTransformForOverlayCoordinates(src, vr::TrackingUniverseStanding, vr::HmdVector2_t{{u, v}}, &m);
@@ -674,10 +680,13 @@ bool sample_placement(vr::VROverlayHandle_t src, SourcePlacement& p, std::string
       return false;
     }
     out = {m.m[0][3], m.m[1][3], m.m[2][3]};
+    if (keep)
+      *keep = m;
     return true;
   };
   Vec3 c{}, l{}, r{}, t{};
-  if (!at(w * 0.5f, h * 0.5f, c) || !at(0.f, h * 0.5f, l) || !at(w, h * 0.5f, r) || !at(w * 0.5f, h, t))
+  if (!at(w * 0.5f, h * 0.5f, c, &centerMatrix) || !at(0.f, h * 0.5f, l) || !at(w, h * 0.5f, r) ||
+      !at(w * 0.5f, h, t))
     return false;
 
   const float chord = length(r - l);
@@ -717,6 +726,12 @@ bool sample_placement(vr::VROverlayHandle_t src, SourcePlacement& p, std::string
   p.heightM = 2.f * halfHeight;
   p.curvature = curvature;
   p.mouseScale = scale;
+  g_overlay->GetOverlayWidthInMeters(src, &p.widthSetting);
+  const auto& cm = centerMatrix.m;
+  p.matrixScale = length(Vec3{cm[0][0], cm[1][0], cm[2][0]});
+  const Vec3 cz{cm[0][2], cm[1][2], cm[2][2]};
+  const float czLen = length(cz);
+  p.facing = czLen > 1e-6f ? dot(cz, z) / czLen : 0.f;
   return true;
 }
 
@@ -739,6 +754,7 @@ bool read_placement(vr::VROverlayHandle_t src, SourcePlacement& p, std::string& 
   p.sampled = false;
   g_overlay->GetOverlayWidthInMeters(src, &p.widthM);
   g_overlay->GetOverlayCurvature(src, &p.curvature);
+  p.widthSetting = p.widthM;
   return true;
 }
 
@@ -1348,6 +1364,23 @@ int main(int argc, char** argv) {
     auto lastDetect = start, lastStats = start;
     bool checkedTexture = false, waitReported = false;
     std::future<std::vector<Listed>> pendingScreens;  // vrcmd takes ~2 s; never block the loop on it
+    // While the game screen moves, log what we read ~4x/s, plus once when it settles.
+    auto lastChange = start, lastChangeLog = start;
+    bool settled = true;
+    const auto log_placement = [&](const char* what, double t) {
+      const Vec3 c{placement.matrix.m[0][3], placement.matrix.m[1][3], placement.matrix.m[2][3]};
+      vr::TrackedDevicePose_t head{};
+      if (sys)
+        sys->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0.f, &head, 1);
+      const auto& hm = head.mDeviceToAbsoluteTracking.m;
+      const float dist = head.bPoseIsValid ? length(c - Vec3{hm[0][3], hm[1][3], hm[2][3]}) : -1.f;
+      INFO("[%6.1fs] %-8s setting %.2f m | ours %.2f x %.2f m at (%.2f, %.2f, %.2f), %.2f m from head | "
+           "matrix scale %.3f, facing %+.2f",
+           t, what, placement.widthSetting, placement.widthM, placement.heightM, c.x, c.y, c.z, dist,
+           placement.matrixScale, placement.facing);
+    };
+    if (source != vr::k_ulOverlayHandleInvalid)
+      log_placement("start", 0.0);
     uint64_t frame = 0;
     uint32_t submits = 0, errors = 0, moves = 0;
     double worstCallMs = 0.0, worstFollowMs = 0.0;
@@ -1404,6 +1437,18 @@ int main(int argc, char** argv) {
           placement = p;
           apply_placement(ours, placement);
           ++moves;
+          lastChange = now;
+          if (settled) {
+            settled = false;
+            lastChangeLog = now;
+            log_placement("changing", elapsed);
+          } else if (now - lastChangeLog >= std::chrono::milliseconds(250)) {
+            lastChangeLog = now;
+            log_placement("changing", elapsed);
+          }
+        } else if (!settled && now - lastChange >= std::chrono::milliseconds(500)) {
+          settled = true;
+          log_placement("settled", elapsed);
         }
         worstFollowMs = std::max(worstFollowMs, std::chrono::duration<double, std::milli>(clock::now() - f0).count());
       }

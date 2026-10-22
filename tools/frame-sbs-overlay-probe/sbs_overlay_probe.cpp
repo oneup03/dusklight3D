@@ -36,6 +36,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <future>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -545,6 +546,8 @@ struct Listed {
 
 std::vector<Listed> list_game_screens(const std::string& vrcmd) {
   std::vector<Listed> out;
+  // Steam's LD_PRELOAD (overlay renderer) only makes the shell print loader errors.
+  unsetenv("LD_PRELOAD");
   const std::string cmd = "'" + vrcmd + "' --overlays 2>/dev/null";
   FILE* p = popen(cmd.c_str(), "r");
   if (!p)
@@ -590,50 +593,157 @@ std::string choose_game_screen(const std::vector<Listed>& screens) {
   return {};
 }
 
-// Placement copied from another overlay, re-read periodically so ours follows it.
+// The Steam app ID Gamescope files our screen under (valve.steam.desktopgame.<id>):
+// from our cgroup scope, app-steam-app<id>-<reaper pid>.scope, which is the lookup
+// Gamescope does, else Steam's launch environment. 0 when not launched from Steam.
+uint32_t own_app_id() {
+  if (FILE* f = std::fopen("/proc/self/cgroup", "r")) {
+    char line[1024];
+    uint32_t appid = 0;
+    while (appid == 0 && std::fgets(line, sizeof line, f)) {
+      const char* scope = std::strrchr(line, '/');
+      scope = scope ? scope + 1 : line;
+      unsigned id = 0;
+      int reaper = 0;
+      if (std::sscanf(scope, "app-steam-app%u-%d.scope", &id, &reaper) == 2)
+        appid = id;
+    }
+    std::fclose(f);
+    if (appid != 0)
+      return appid;
+  }
+  for (const char* name : {"SteamGameId", "SteamAppId"}) {
+    if (const char* v = std::getenv(name)) {
+      // Non-Steam shortcuts get a 64-bit game ID with the app ID in the top half.
+      const unsigned long long id = std::strtoull(v, nullptr, 10);
+      if (id > 0xffffffffull)
+        return uint32_t(id >> 32);
+      if (id != 0)
+        return uint32_t(id);
+    }
+  }
+  return 0;
+}
+
+struct Vec3 {
+  float x, y, z;
+};
+Vec3 operator+(Vec3 a, Vec3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
+Vec3 operator-(Vec3 a, Vec3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+Vec3 operator*(Vec3 a, float s) { return {a.x * s, a.y * s, a.z * s}; }
+float dot(Vec3 a, Vec3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+Vec3 cross(Vec3 a, Vec3 b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
+float length(Vec3 a) { return std::sqrt(dot(a, a)); }
+
+// Placement copied from another overlay, re-read every frame so ours follows it.
 struct SourcePlacement {
   vr::VROverlayTransformType type = vr::VROverlayTransform_Invalid;
+  bool sampled = false;  // rebuilt from points on the overlay (dashboard-placed screens)
   vr::ETrackingUniverseOrigin origin = vr::TrackingUniverseStanding;
   vr::TrackedDeviceIndex_t device = 0;
   vr::HmdMatrix34_t matrix{};
   float widthM = 0.f;
+  float heightM = 0.f;  // sampled only
   float curvature = 0.f;
+  vr::HmdVector2_t mouseScale{};  // sampled only
 
   bool same_as(const SourcePlacement& o) const {
-    return type == o.type && origin == o.origin && device == o.device &&
+    return type == o.type && sampled == o.sampled && origin == o.origin && device == o.device &&
            std::memcmp(&matrix, &o.matrix, sizeof matrix) == 0 && widthM == o.widthM &&
            curvature == o.curvature;
   }
 };
 
-bool read_placement(vr::VROverlayHandle_t src, SourcePlacement& p, bool verbose) {
+// Steam's game screen on the Frame is a DashboardTab overlay: the dashboard places it
+// and there is no getter for that transform. GetTransformForOverlayCoordinates still
+// reports where any point of it is in the world, so rebuild the pose from its center,
+// left/right edges and top edge. Overlay coordinates are in mouse-scale units, 0,0 at
+// the lower left.
+bool sample_placement(vr::VROverlayHandle_t src, SourcePlacement& p, std::string& why) {
+  vr::HmdVector2_t scale{};
+  if (g_overlay->GetOverlayMouseScale(src, &scale) != vr::VROverlayError_None || scale.v[0] <= 0.f ||
+      scale.v[1] <= 0.f)
+    scale.v[0] = scale.v[1] = 1.f;
+  const float w = scale.v[0], h = scale.v[1];
+  const auto at = [&](float u, float v, Vec3& out) {
+    vr::HmdMatrix34_t m{};
+    const vr::EVROverlayError e =
+        g_overlay->GetTransformForOverlayCoordinates(src, vr::TrackingUniverseStanding, vr::HmdVector2_t{{u, v}}, &m);
+    if (e != vr::VROverlayError_None) {
+      why = std::string("GetTransformForOverlayCoordinates: ") + ov_err(e);
+      return false;
+    }
+    out = {m.m[0][3], m.m[1][3], m.m[2][3]};
+    return true;
+  };
+  Vec3 c{}, l{}, r{}, t{};
+  if (!at(w * 0.5f, h * 0.5f, c) || !at(0.f, h * 0.5f, l) || !at(w, h * 0.5f, r) || !at(w * 0.5f, h, t))
+    return false;
+
+  const float chord = length(r - l);
+  if (chord < 1e-4f) {
+    why = "game screen reports zero width (all sampled points coincide)";
+    return false;
+  }
+  const Vec3 x = (r - l) * (1.f / chord);
+  Vec3 up = t - c;
+  up = up - x * dot(up, x);
+  const float halfHeight = length(up);
+  if (halfHeight < 1e-5f) {
+    why = "game screen reports zero height";
+    return false;
+  }
+  const Vec3 y = up * (1.f / halfHeight);
+  const Vec3 z = cross(x, y);  // toward the viewer: the overlay's front
+
+  float curvature = 0.f;
+  g_overlay->GetOverlayCurvature(src, &curvature);
+  // A curved overlay wraps a cylinder whose circumference is width / curvature, so the
+  // edge-to-edge chord is shorter than the width.
+  const float a = float(kPi) * curvature;
+  const float widthM = a > 1e-4f ? chord * a / std::sin(a) : chord;
+
+  // 1 cm toward the viewer so we also win the back-to-front ordering.
+  const Vec3 pos = c + z * 0.01f;
+  const Vec3 cols[4] = {x, y, z, pos};
+  for (int col = 0; col < 4; ++col) {
+    p.matrix.m[0][col] = cols[col].x;
+    p.matrix.m[1][col] = cols[col].y;
+    p.matrix.m[2][col] = cols[col].z;
+  }
+  p.sampled = true;
+  p.origin = vr::TrackingUniverseStanding;
+  p.widthM = widthM;
+  p.heightM = 2.f * halfHeight;
+  p.curvature = curvature;
+  p.mouseScale = scale;
+  return true;
+}
+
+bool read_placement(vr::VROverlayHandle_t src, SourcePlacement& p, std::string& why) {
   vr::EVROverlayError e = g_overlay->GetOverlayTransformType(src, &p.type);
   if (e != vr::VROverlayError_None) {
-    if (verbose)
-      BAD("GetOverlayTransformType: %s", ov_err(e));
+    why = std::string("GetOverlayTransformType: ") + ov_err(e);
     return false;
   }
   if (p.type == vr::VROverlayTransform_Absolute)
     e = g_overlay->GetOverlayTransformAbsolute(src, &p.origin, &p.matrix);
   else if (p.type == vr::VROverlayTransform_TrackedDeviceRelative)
     e = g_overlay->GetOverlayTransformTrackedDeviceRelative(src, &p.device, &p.matrix);
-  else {
-    if (verbose)
-      BAD("game screen uses transform type %s, which this probe cannot copy", transform_type_name(p.type));
-    return false;
-  }
+  else
+    return sample_placement(src, p, why);
   if (e != vr::VROverlayError_None) {
-    if (verbose)
-      BAD("reading the game screen transform: %s", ov_err(e));
+    why = std::string("reading the game screen transform: ") + ov_err(e);
     return false;
   }
+  p.sampled = false;
   g_overlay->GetOverlayWidthInMeters(src, &p.widthM);
   g_overlay->GetOverlayCurvature(src, &p.curvature);
   return true;
 }
 
 void apply_placement(vr::VROverlayHandle_t dst, const SourcePlacement& p) {
-  if (p.type == vr::VROverlayTransform_Absolute)
+  if (p.sampled || p.type == vr::VROverlayTransform_Absolute)
     g_overlay->SetOverlayTransformAbsolute(dst, p.origin, &p.matrix);
   else
     g_overlay->SetOverlayTransformTrackedDeviceRelative(dst, p.device, &p.matrix);
@@ -1105,68 +1215,97 @@ int main(int argc, char** argv) {
     // copy its placement every frame. Until it exists, sit in front of the headset.
     vr::VROverlayHandle_t source = vr::k_ulOverlayHandleInvalid;
     SourcePlacement placement;
-    // Repeat attempts while waiting pass verbose=false so failures don't spam the log.
-    const auto find_screen = [&](bool verbose) -> std::string {
-      if (!opt.cover.empty())
-        return opt.cover;
-      const std::vector<Listed> screens = list_game_screens(opt.vrcmd);
+    // Each distinct failure is logged once; retries while waiting would repeat it.
+    std::string lastFailure;
+    const auto fail = [&](const std::string& why) {
+      if (why != lastFailure) {
+        BAD("%s", why.c_str());
+        lastFailure = why;
+      }
+    };
+    // Launched from Steam, our screen's key follows from our app ID; otherwise ask vrcmd.
+    const uint32_t appId = own_app_id();
+    std::string screenKey = opt.cover;
+    if (screenKey.empty() && appId != 0)
+      screenKey = "valve.steam.desktopgame." + std::to_string(appId);
+    if (appId != 0)
+      INFO("launched by Steam as app %u", appId);
+    const auto pick_screen = [&](const std::vector<Listed>& screens, bool verbose) -> std::string {
       if (verbose) {
         for (const Listed& s : screens)
           INFO("game screen: %s (%s)", s.key.c_str(), s.visible ? "visible" : "hidden");
       }
       std::string key = choose_game_screen(screens);
-      if (key.empty() && verbose)
-        BAD("%s", screens.empty() ? "no Gamescope game screen found yet" :
-                                   "several game screens; pick one with --cover KEY");
+      if (key.empty())
+        fail(screens.empty() ? "no Gamescope game screen found yet" :
+                               "several game screens; pick one with --cover KEY");
       return key;
     };
-    const auto attach = [&](const std::string& key, bool verbose) -> bool {
+    bool describedSource = false;
+    const auto attach = [&](const std::string& key) -> bool {
       vr::VROverlayHandle_t handle = vr::k_ulOverlayHandleInvalid;
       const vr::EVROverlayError fe = g_overlay->FindOverlay(key.c_str(), &handle);
       if (fe != vr::VROverlayError_None) {
-        if (verbose)
-          BAD("FindOverlay(%s): %s", key.c_str(), ov_err(fe));
+        fail("game screen " + key + " not found yet (" + ov_err(fe) + ")");
         return false;
       }
+      uint32_t srcSort = 0;
+      g_overlay->GetOverlaySortOrder(handle, &srcSort);
+      if (!describedSource) {
+        describedSource = true;
+        float texel = 0.f, srcWidth = 0.f;
+        uint32_t srcW = 0, srcH = 0, srcFlags = 0;
+        vr::VROverlayTransformType type = vr::VROverlayTransform_Invalid;
+        g_overlay->GetOverlayTransformType(handle, &type);
+        g_overlay->GetOverlayTexelAspect(handle, &texel);
+        g_overlay->GetOverlayWidthInMeters(handle, &srcWidth);
+        g_overlay->GetOverlayFlags(handle, &srcFlags);
+        const vr::EVROverlayError sizeErr = g_overlay->GetOverlayTextureSize(handle, &srcW, &srcH);
+        INFO("game screen %s: transform %s, width setting %.2f m, sort order %u, flags 0x%08x", key.c_str(),
+             transform_type_name(type), srcWidth, srcSort, srcFlags);
+        if (sizeErr == vr::VROverlayError_None)
+          INFO("game screen texture %ux%u, texel aspect %.3f", srcW, srcH, texel);
+        else
+          INFO("game screen texture size unavailable (%s), texel aspect %.3f", ov_err(sizeErr), texel);
+        if (srcFlags & (vr::VROverlayFlags_SideBySide_Parallel | vr::VROverlayFlags_SideBySide_Crossed))
+          INFO("note: the game screen currently has SbS enabled (frame-sbs-toggle?)");
+      }
       SourcePlacement p;
-      if (!read_placement(handle, p, verbose))
+      std::string why;
+      if (!read_placement(handle, p, why)) {
+        fail(why);
         return false;
+      }
       source = handle;
       placement = p;
       apply_placement(ours, placement);
-
-      INFO("covering %s", key.c_str());
-      float texel = 0.f;
-      uint32_t srcW = 0, srcH = 0, srcSort = 0, srcFlags = 0;
-      g_overlay->GetOverlayTexelAspect(source, &texel);
-      g_overlay->GetOverlaySortOrder(source, &srcSort);
-      g_overlay->GetOverlayFlags(source, &srcFlags);
-      const vr::EVROverlayError sizeErr = g_overlay->GetOverlayTextureSize(source, &srcW, &srcH);
-      if (sizeErr == vr::VROverlayError_None)
-        INFO("game screen texture %ux%u, texel aspect %.3f, sort order %u, flags 0x%08x", srcW, srcH, texel,
-             srcSort, srcFlags);
-      else
-        INFO("game screen texture size unavailable (%s), texel aspect %.3f, sort order %u, flags 0x%08x",
-             ov_err(sizeErr), texel, srcSort, srcFlags);
-      if (srcFlags & (vr::VROverlayFlags_SideBySide_Parallel | vr::VROverlayFlags_SideBySide_Crossed))
-        INFO("note: the game screen currently has SbS enabled (frame-sbs-toggle?)");
-      if (sizeErr == vr::VROverlayError_None && srcW > 0 && srcH > 0) {
-        const double srcAspect = double(srcW) / srcH * texel;
-        const double ourAspect = double(opt.eyeWidth) / opt.eyeHeight * opt.texelAspect;
-        if (std::fabs(srcAspect - ourAspect) > 0.01)
-          INFO("aspect differs (screen %.3f vs probe %.3f per eye); --eye can match it", srcAspect, ourAspect);
-      }
       const uint32_t sort = srcSort == UINT32_MAX ? srcSort : srcSort + 1;
       g_overlay->SetOverlaySortOrder(ours, sort);
-      OK("placed over the game screen (%s, %.2f m wide, curvature %.2f, sort order %u)",
-         transform_type_name(placement.type), placement.widthM, placement.curvature, sort);
+      if (p.sampled) {
+        const Vec3 c{p.matrix.m[0][3], p.matrix.m[1][3], p.matrix.m[2][3]};
+        OK("following %s by sampling points on it: %.2f x %.2f m, curvature %.2f, sort order %u",
+           transform_type_name(p.type), p.widthM, p.heightM, p.curvature, sort);
+        INFO("mouse scale %.0f x %.0f, center (%.2f, %.2f, %.2f) m", p.mouseScale.v[0], p.mouseScale.v[1], c.x, c.y,
+             c.z);
+        const double ourAspect = double(opt.eyeWidth) / opt.eyeHeight * opt.texelAspect;
+        if (p.heightM > 0.f && std::fabs(p.widthM / p.heightM - ourAspect) > 0.02)
+          INFO("aspect differs (screen %.3f vs probe %.3f per eye); --eye can match it", p.widthM / p.heightM,
+               ourAspect);
+      } else {
+        OK("placed over the game screen (%s, %.2f m wide, curvature %.2f, sort order %u)",
+           transform_type_name(p.type), p.widthM, p.curvature, sort);
+      }
       return true;
     };
 
     bool attached = false;
     if (!opt.front) {
-      const std::string key = find_screen(true);
-      attached = !key.empty() && attach(key, true);
+      if (!screenKey.empty()) {
+        attached = attach(screenKey);
+      } else {
+        const std::string key = pick_screen(list_game_screens(opt.vrcmd), true);
+        attached = !key.empty() && attach(key);
+      }
     }
     if (!attached) {
       if (place_in_front(sys, ours, opt.distance, opt.widthM))
@@ -1208,9 +1347,10 @@ int main(int argc, char** argv) {
     auto nextFrame = start;
     auto lastDetect = start, lastStats = start;
     bool checkedTexture = false, waitReported = false;
+    std::future<std::vector<Listed>> pendingScreens;  // vrcmd takes ~2 s; never block the loop on it
     uint64_t frame = 0;
-    uint32_t submits = 0, errors = 0;
-    double worstCallMs = 0.0;
+    uint32_t submits = 0, errors = 0, moves = 0;
+    double worstCallMs = 0.0, worstFollowMs = 0.0;
     vr::EVROverlayError lastError = vr::VROverlayError_None;
 
     while (!g_quit) {
@@ -1234,24 +1374,38 @@ int main(int argc, char** argv) {
       }
 
       if (source == vr::k_ulOverlayHandleInvalid && !opt.front) {
-        if (elapsed < waitSeconds && now - lastDetect >= std::chrono::seconds(1)) {
-          lastDetect = now;
-          const std::string key = find_screen(false);
-          if (!key.empty())
-            attach(key, false);
-        } else if (elapsed >= waitSeconds && waitSeconds > 0 && !waitReported) {
+        if (elapsed < waitSeconds) {
+          if (!screenKey.empty()) {
+            if (now - lastDetect >= std::chrono::milliseconds(250)) {
+              lastDetect = now;
+              attach(screenKey);
+            }
+          } else if (pendingScreens.valid()) {
+            if (pendingScreens.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+              const std::string key = pick_screen(pendingScreens.get(), false);
+              if (!key.empty())
+                attach(key);
+            }
+          } else if (now - lastDetect >= std::chrono::seconds(1)) {
+            lastDetect = now;
+            pendingScreens = std::async(std::launch::async, list_game_screens, opt.vrcmd);
+          }
+        } else if (waitSeconds > 0 && !waitReported) {
           waitReported = true;
-          BAD("no game screen appeared within %.0f s; staying in front of the headset", waitSeconds);
-          find_screen(true);  // log what was there
+          BAD("nothing to follow after %.0f s; staying in front of the headset", waitSeconds);
         }
       }
 
       if (source != vr::k_ulOverlayHandleInvalid) {
+        const auto f0 = clock::now();
         SourcePlacement p;
-        if (read_placement(source, p, false) && !p.same_as(placement)) {
+        std::string why;
+        if (read_placement(source, p, why) && !p.same_as(placement)) {
           placement = p;
           apply_placement(ours, placement);
+          ++moves;
         }
+        worstFollowMs = std::max(worstFollowMs, std::chrono::duration<double, std::milli>(clock::now() - f0).count());
       }
 
       if (opt.animate || frame == 0) {
@@ -1278,12 +1432,15 @@ int main(int argc, char** argv) {
         checkedTexture = true;
         uint32_t w = 0, h = 0;
         const vr::EVROverlayError te = g_overlay->GetOverlayTextureSize(ours, &w, &h);
+        // Shared-handle textures report 0x0 here even when they display correctly.
         if (te == vr::VROverlayError_None && w == texW && h == texH)
           OK("SteamVR reports our texture as %ux%u", w, h);
+        else if (te == vr::VROverlayError_None && w == 0 && h == 0)
+          INFO("SteamVR reports 0x0 for shared-handle textures (expected)");
         else if (te == vr::VROverlayError_None)
           BAD("SteamVR reports our texture as %ux%u (expected %ux%u)", w, h, texW, texH);
         else
-          INFO("texture size not reported for shared handles (%s); judge it in the headset", ov_err(te));
+          INFO("texture size not reported for shared handles (%s)", ov_err(te));
         if (g_overlay->IsOverlayVisible(ours))
           OK("overlay is visible");
         else
@@ -1295,9 +1452,11 @@ int main(int argc, char** argv) {
       if (opt.animate && now - lastStats >= std::chrono::seconds(5)) {
         const double secs = std::chrono::duration<double>(now - lastStats).count();
         INFO("%.1f submits/s, %u error(s), slowest SetOverlayTexture %.2f ms", submits / secs, errors, worstCallMs);
+        if (source != vr::k_ulOverlayHandleInvalid)
+          INFO("following: %u placement change(s), slowest read %.2f ms", moves, worstFollowMs);
         lastStats = now;
-        submits = errors = 0;
-        worstCallMs = 0.0;
+        submits = errors = moves = 0;
+        worstCallMs = worstFollowMs = 0.0;
       }
 
       nextFrame += step;

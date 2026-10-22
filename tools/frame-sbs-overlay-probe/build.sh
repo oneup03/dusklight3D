@@ -39,6 +39,6 @@ if [ -z "${OPENVR_INCLUDE_DIR:-}" ]; then
 fi
 
 # Static C++ runtime so a CI-built binary doesn't depend on the Frame's libstdc++.
-g++ -std=c++17 -O2 -Wall -Wextra -I"$include" sbs_overlay_probe.cpp -static-libstdc++ -static-libgcc -ldl \
+g++ -std=c++17 -O2 -Wall -Wextra -I"$include" sbs_overlay_probe.cpp -static-libstdc++ -static-libgcc -pthread -ldl \
     -o sbs-overlay-probe
 echo "Built $PWD/sbs-overlay-probe"

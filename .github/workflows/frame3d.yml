@@ -1,0 +1,49 @@
+name: Frame-3D-Lib
+
+on:
+  push:
+    paths:
+      - 'extern/Frame-3D-Lib/**'
+      - '.github/workflows/frame3d.yml'
+  pull_request:
+    paths:
+      - 'extern/Frame-3D-Lib/**'
+      - '.github/workflows/frame3d.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build test pattern (aarch64)
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+
+      # Static C++ runtime so the binary doesn't depend on the Frame's libstdc++.
+      - name: Configure
+        run: >
+          cmake -S extern/Frame-3D-Lib -B build/frame3d -DCMAKE_BUILD_TYPE=Release
+          -DFRAME3D_BUILD_EXAMPLES=ON -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
+          -DCMAKE_CXX_FLAGS="-Wall -Wextra"
+
+      - name: Build
+        run: cmake --build build/frame3d -j
+
+      - name: Smoke test
+        working-directory: build/frame3d
+        run: |
+          file frame3d-test-pattern
+          ldd frame3d-test-pattern
+          ./frame3d-test-pattern --help
+
+      # Tarred so the executable bit survives the artifact zip.
+      - name: Package
+        run: tar czf frame3d-test-pattern-aarch64.tar.gz -C build/frame3d frame3d-test-pattern
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: frame3d-test-pattern-aarch64
+          path: frame3d-test-pattern-aarch64.tar.gz

@@ -130,6 +130,11 @@ jobs:
         with:
           submodule-pat: ${{ secrets.SHARED_PAT || secrets.SUBMODULE_PAT }}
 
+      # The Command Line Tools linker always matches its own SDK.
+      - name: "Use the Command Line Tools toolchain"
+        if: matrix.platform == 'macos'
+        run: sudo xcode-select -s /Library/Developer/CommandLineTools
+
       - name: Install dependencies
         run: brew install cmake ninja
 

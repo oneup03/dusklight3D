@@ -10,3 +10,6 @@
 [submodule "mods/cosmetics"]
 	path = mods/cosmetics
 	url = https://github.com/TwilitRealm/dusklight-cosmetics
+[submodule "extern/Frame-3D-Lib"]
+	path = extern/Frame-3D-Lib
+	url = https://github.com/oneup03/Frame-3D-Lib.git

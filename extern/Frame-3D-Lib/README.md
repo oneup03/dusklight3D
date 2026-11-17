@@ -89,7 +89,11 @@ So the library measures the screen with the laser hit test
 through the screen's left edge, center and right edge give three surface points:
 their circle is the screen's curvature (OpenVR's definition, width / (2 pi r)), and
 their UVs give its true width and center. A fourth ray above the center gives the
-height. The overlay is placed 2 cm in front of the screen with the same curvature.
+height. The overlay is placed 2 cm in front of the screen with the same curvature, and
+fitted inside it at the image's own aspect (`eye_width / eye_height`), the way Gamescope
+fits the app's window into the screen: an image narrower than the screen gets the
+screen's height and a narrower width on the same cylinder, so it covers exactly the
+app's content and leaves the screen's edges and Steam's controls below it visible.
 
 The screen is found by key: `valve.steam.desktopgame.<appid>`, with the Steam app ID
 read from the process's cgroup (`app-steam-app<id>-<pid>.scope`), which is

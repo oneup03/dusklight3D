@@ -243,7 +243,10 @@ bool ScreenFollower::measure(Placement& out, std::string& why) {
       why = "no head pose to measure from";
       return false;
     }
-    return measure_dashboard(head, out, why);
+    if (!measure_dashboard(head, out, why))
+      return false;
+    fit_image(out);
+    return true;
   }
 
   // A screen with a readable transform (not the Frame's dashboard tab): copy it.
@@ -265,7 +268,29 @@ bool ScreenFollower::measure(Placement& out, std::string& why) {
   out.matrix.m[0][3] = pos.x;
   out.matrix.m[1][3] = pos.y;
   out.matrix.m[2][3] = pos.z;
+  fit_image(out);
   return true;
+}
+
+// The screen shows the app's window fitted inside it at the window's own aspect
+// (Gamescope pillarboxes or letterboxes it), and our image has that aspect too.
+// SteamVR derives our height from the width, so taking the screen's width for an
+// image narrower than the screen would make ours taller than the screen. Fit it
+// the same way instead; a narrower curved overlay keeps the screen's radius.
+void ScreenFollower::fit_image(Placement& p) const {
+  p.screenWidth = p.width;
+  p.screenHeight = p.height;
+  const float aspect = m_fallback.aspect;
+  if (aspect <= 0.f || p.width <= 0.f || p.height <= 0.f)
+    return;
+  if (p.width / p.height > aspect) {
+    const float width = p.height * aspect;
+    if (p.curvature > 0.f)
+      p.curvature *= width / p.width;  // width / (2 pi r) at the same r
+    p.width = width;
+  } else {
+    p.height = p.width / aspect;
+  }
 }
 
 bool ScreenFollower::measure_dashboard(Vec3 head, Placement& out, std::string& why) {
@@ -504,8 +529,10 @@ void ScreenFollower::log_placement(const char* what) const {
   const float dist = head_position(head) ? length(c - head) : -1.f;
   const float radius = m_current.curvature > 0.f ? m_current.width / (2.f * kPi * m_current.curvature) : 0.f;
   (*m_log)(std::strcmp(what, "changing") == 0 ? FRAME3D_LOG_DEBUG : FRAME3D_LOG_INFO,
-           "screen %s: %.2f x %.2f m, curvature %.3f (radius %.2f m), center (%.2f, %.2f, %.2f), %.2f m from head",
-           what, m_current.width, m_current.height, m_current.curvature, radius, c.x, c.y, c.z, dist);
+           "screen %s: %.2f x %.2f m; overlay %.2f x %.2f m, curvature %.3f (radius %.2f m), center (%.2f, %.2f, "
+           "%.2f), %.2f m from head",
+           what, m_current.screenWidth, m_current.screenHeight, m_current.width, m_current.height,
+           m_current.curvature, radius, c.x, c.y, c.z, dist);
 }
 
 }  // namespace frame3d

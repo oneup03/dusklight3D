@@ -29,7 +29,9 @@ public:
   struct Fallback {
     float distanceM = 2.0f;
     float widthM = 1.6f;
-    float aspect = 16.f / 9.f;  // per-eye width / height, for the reported height
+    // Per-eye image width / height: the fixed overlay's height, and the shape a
+    // followed overlay is fitted to inside the screen.
+    float aspect = 16.f / 9.f;
   };
 
   void init(vr::IVROverlay* overlay, vr::IVRSystem* system, vr::VROverlayHandle_t ours, std::string screenKey,
@@ -55,6 +57,7 @@ private:
     vr::TrackedDeviceIndex_t device = 0;
     vr::HmdMatrix34_t matrix{};
     float width = 0.f, height = 0.f, curvature = 0.f;
+    float screenWidth = 0.f, screenHeight = 0.f;  // the screen as measured, before fit_image
     bool measuredByRays = false;
 
     bool same_as(const Placement& o) const;
@@ -63,6 +66,7 @@ private:
   void discover(Clock::time_point now);
   bool measure(Placement& out, std::string& why);
   bool measure_dashboard(Vec3 head, Placement& out, std::string& why);
+  void fit_image(Placement& p) const;
   bool head_position(Vec3& out) const;
   bool probe_center(Vec3& out) const;
   void apply(const Placement& p);
